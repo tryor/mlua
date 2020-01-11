@@ -1,5 +1,9 @@
 use std::panic::catch_unwind;
 
+use futures::executor::block_on;
+use futures::stream::TryStreamExt;
+use futures::pin_mut;
+
 use mlua::{Error, Function, Lua, Result, Thread, ThreadStatus};
 
 #[test]
@@ -89,6 +93,42 @@ fn test_thread() -> Result<()> {
         Err(_) => panic!("resuming dead coroutine error is not CoroutineInactive kind"),
         _ => panic!("resuming dead coroutine did not return error"),
     }
+
+    Ok(())
+}
+
+#[test]
+fn test_thread_stream() -> Result<()> {
+    let lua = Lua::new();
+
+    let thread = lua.create_thread(
+        lua.load(
+            r#"
+            function (s)
+                local sum = s
+                for i = 1,10 do
+                    sum = sum + i
+                    coroutine.yield(sum)
+                end
+                return sum
+            end
+            "#,
+        )
+        .eval()?,
+    )?;
+
+    let result = block_on(async {
+        let s = thread.into_stream(0);
+        pin_mut!(s);
+        let mut sum = 0;
+        while let Some((lua, item)) = s.try_next().await? {
+            let n: i64 = lua.unpack_multi(item)?;
+            sum += n;
+        }
+        Ok::<_, Error>(sum)
+    })?;
+
+    assert_eq!(result, 275);
 
     Ok(())
 }

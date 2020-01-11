@@ -1,7 +1,12 @@
 use std::os::raw::c_int;
+use std::pin::Pin;
+
+use futures::stream::Stream;
+use futures::task::{Context, Poll};
 
 use crate::error::{Error, Result};
 use crate::ffi;
+use crate::lua::Lua;
 use crate::types::LuaRef;
 use crate::util::{
     assert_stack, check_stack, error_traceback, pop_error, protect_lua_closure, StackGuard,
@@ -26,6 +31,12 @@ pub enum ThreadStatus {
 /// Handle to an internal Lua thread (or coroutine).
 #[derive(Clone, Debug)]
 pub struct Thread(pub(crate) LuaRef);
+
+#[derive(Debug)]
+pub struct ThreadStream {
+    thread: Thread,
+    args0: Option<Result<MultiValue>>,
+}
 
 impl Thread {
     /// Resumes execution of this thread.
@@ -142,10 +153,46 @@ impl Thread {
             }
         }
     }
+
+    pub fn into_stream<A>(self, args: A) -> ThreadStream
+    where
+        A: ToLuaMulti
+    {
+        let args = args.to_lua_multi(&self.0.lua);
+        ThreadStream {
+            thread: self,
+            args0: Some(args),
+        }
+    }
 }
 
 impl PartialEq for Thread {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
+    }
+}
+
+impl Stream for ThreadStream {
+    type Item = Result<(Lua, MultiValue)>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.thread.status() {
+            ThreadStatus::Resumable => {}
+            _ => return Poll::Ready(None),
+        }
+
+        let r: Result<MultiValue> = if let Some(args) = self.args0.take() {
+            match args {
+                Err(e) => return Poll::Ready(Some(Err(e))),
+                Ok(x) => self.thread.resume(x),
+            }
+        } else {
+            self.thread.resume(())
+        };
+
+        cx.waker().wake_by_ref();
+
+        let lua = self.thread.0.lua.clone();
+        return Poll::Ready(Some(r.map(move |x| (lua, x))));
     }
 }
