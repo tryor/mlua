@@ -25,9 +25,9 @@ pub enum ThreadStatus {
 
 /// Handle to an internal Lua thread (or coroutine).
 #[derive(Clone, Debug)]
-pub struct Thread<'lua>(pub(crate) LuaRef<'lua>);
+pub struct Thread(pub(crate) LuaRef);
 
-impl<'lua> Thread<'lua> {
+impl Thread {
     /// Resumes execution of this thread.
     ///
     /// Equivalent to `coroutine.resume`.
@@ -71,10 +71,10 @@ impl<'lua> Thread<'lua> {
     /// ```
     pub fn resume<A, R>(&self, args: A) -> Result<R>
     where
-        A: ToLuaMulti<'lua>,
-        R: FromLuaMulti<'lua>,
+        A: ToLuaMulti,
+        R: FromLuaMulti,
     {
-        let lua = self.0.lua;
+        let lua = &self.0.lua;
         let args = args.to_lua_multi(lua)?;
         let results = unsafe {
             let _sg = StackGuard::new(lua.state);
@@ -123,7 +123,7 @@ impl<'lua> Thread<'lua> {
 
     /// Gets the status of the thread.
     pub fn status(&self) -> ThreadStatus {
-        let lua = self.0.lua;
+        let lua = &self.0.lua;
         unsafe {
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 1);
@@ -144,7 +144,7 @@ impl<'lua> Thread<'lua> {
     }
 }
 
-impl<'lua> PartialEq for Thread<'lua> {
+impl PartialEq for Thread {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }

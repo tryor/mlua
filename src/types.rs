@@ -17,8 +17,8 @@ pub type Number = ffi::lua_Number;
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct LightUserData(pub *mut c_void);
 
-pub(crate) type Callback<'lua, 'a> =
-    Box<dyn Fn(&'lua Lua, MultiValue<'lua>) -> Result<MultiValue<'lua>> + 'a>;
+pub(crate) type Callback<'a> =
+    Box<dyn Fn(&Lua, MultiValue) -> Result<MultiValue> + 'a>;
 
 /// An auto generated key into the Lua registry.
 ///
@@ -71,32 +71,32 @@ impl RegistryKey {
     }
 }
 
-pub(crate) struct LuaRef<'lua> {
-    pub(crate) lua: &'lua Lua,
+pub(crate) struct LuaRef {
+    pub(crate) lua: Lua,
     pub(crate) index: c_int,
 }
 
-impl<'lua> fmt::Debug for LuaRef<'lua> {
+impl fmt::Debug for LuaRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Ref({})", self.index)
     }
 }
 
-impl<'lua> Clone for LuaRef<'lua> {
+impl Clone for LuaRef {
     fn clone(&self) -> Self {
         self.lua.clone_ref(self)
     }
 }
 
-impl<'lua> Drop for LuaRef<'lua> {
+impl Drop for LuaRef {
     fn drop(&mut self) {
-        self.lua.drop_ref(self)
+        self.lua.clone().drop_ref(self)
     }
 }
 
-impl<'lua> PartialEq for LuaRef<'lua> {
+impl PartialEq for LuaRef {
     fn eq(&self, other: &Self) -> bool {
-        let lua = self.lua;
+        let lua = &self.lua;
         unsafe {
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 2);

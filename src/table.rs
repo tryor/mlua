@@ -10,9 +10,9 @@ use crate::value::{FromLua, FromLuaMulti, Nil, ToLua, ToLuaMulti, Value};
 
 /// Handle to an internal Lua table.
 #[derive(Clone, Debug)]
-pub struct Table<'lua>(pub(crate) LuaRef<'lua>);
+pub struct Table(pub(crate) LuaRef);
 
-impl<'lua> Table<'lua> {
+impl Table {
     /// Sets a key-value pair in the table.
     ///
     /// If the value is `nil`, this will effectively remove the pair.
@@ -46,8 +46,8 @@ impl<'lua> Table<'lua> {
     /// ```
     ///
     /// [`raw_set`]: #method.raw_set
-    pub fn set<K: ToLua<'lua>, V: ToLua<'lua>>(&self, key: K, value: V) -> Result<()> {
-        let lua = self.0.lua;
+    pub fn set<K: ToLua, V: ToLua>(&self, key: K, value: V) -> Result<()> {
+        let lua = &self.0.lua;
         let key = key.to_lua(lua)?;
         let value = value.to_lua(lua)?;
         unsafe {
@@ -90,8 +90,8 @@ impl<'lua> Table<'lua> {
     /// ```
     ///
     /// [`raw_get`]: #method.raw_get
-    pub fn get<K: ToLua<'lua>, V: FromLua<'lua>>(&self, key: K) -> Result<V> {
-        let lua = self.0.lua;
+    pub fn get<K: ToLua, V: FromLua>(&self, key: K) -> Result<V> {
+        let lua = &self.0.lua;
         let key = key.to_lua(lua)?;
         let value = unsafe {
             let _sg = StackGuard::new(lua.state);
@@ -111,8 +111,8 @@ impl<'lua> Table<'lua> {
     }
 
     /// Checks whether the table contains a non-nil value for `key`.
-    pub fn contains_key<K: ToLua<'lua>>(&self, key: K) -> Result<bool> {
-        let lua = self.0.lua;
+    pub fn contains_key<K: ToLua>(&self, key: K) -> Result<bool> {
+        let lua = &self.0.lua;
         let key = key.to_lua(lua)?;
 
         unsafe {
@@ -156,11 +156,11 @@ impl<'lua> Table<'lua> {
     /// This might invoke the `__index` metamethod.
     pub fn call<K, A, R>(&self, key: K, args: A) -> Result<R>
     where
-        K: ToLua<'lua>,
-        A: ToLuaMulti<'lua>,
-        R: FromLuaMulti<'lua>,
+        K: ToLua,
+        A: ToLuaMulti,
+        R: FromLuaMulti,
     {
-        let lua = self.0.lua;
+        let lua = &self.0.lua;
         let mut args = args.to_lua_multi(lua)?;
         args.push_front(Value::Table(self.clone()));
         self.get::<_, Function>(key)?.call(args)
@@ -223,8 +223,8 @@ impl<'lua> Table<'lua> {
     }
 
     /// Sets a key-value pair without invoking metamethods.
-    pub fn raw_set<K: ToLua<'lua>, V: ToLua<'lua>>(&self, key: K, value: V) -> Result<()> {
-        let lua = self.0.lua;
+    pub fn raw_set<K: ToLua, V: ToLua>(&self, key: K, value: V) -> Result<()> {
+        let lua = &self.0.lua;
         let key = key.to_lua(lua)?;
         let value = value.to_lua(lua)?;
 
@@ -247,8 +247,8 @@ impl<'lua> Table<'lua> {
     }
 
     /// Gets the value associated to `key` without invoking metamethods.
-    pub fn raw_get<K: ToLua<'lua>, V: FromLua<'lua>>(&self, key: K) -> Result<V> {
-        let lua = self.0.lua;
+    pub fn raw_get<K: ToLua, V: FromLua>(&self, key: K) -> Result<V> {
+        let lua = &self.0.lua;
         let key = key.to_lua(lua)?;
         let value = unsafe {
             let _sg = StackGuard::new(lua.state);
@@ -264,8 +264,8 @@ impl<'lua> Table<'lua> {
 
     /// Inserts element value at position idx to the table, shifting up the elements from table[idx].
     /// The worst case complexity is O(n), where n is the table length.
-    pub fn raw_insert<V: ToLua<'lua>>(&self, idx: Integer, value: V) -> Result<()> {
-        let lua = self.0.lua;
+    pub fn raw_insert<V: ToLua>(&self, idx: Integer, value: V) -> Result<()> {
+        let lua = &self.0.lua;
         let size = self.raw_len();
         if idx < 1 || idx > size + 1 {
             return Err(Error::RuntimeError("index out of bounds".to_string()));
@@ -297,8 +297,8 @@ impl<'lua> Table<'lua> {
     /// where n is the table length.
     ///
     /// For othey key types this is equivalent to setting table[key] = nil.
-    pub fn raw_remove<K: ToLua<'lua>>(&self, key: K) -> Result<()> {
-        let lua = self.0.lua;
+    pub fn raw_remove<K: ToLua>(&self, key: K) -> Result<()> {
+        let lua = &self.0.lua;
         let key = key.to_lua(lua)?;
         match key {
             Value::Integer(idx) => {
@@ -332,7 +332,7 @@ impl<'lua> Table<'lua> {
     ///
     /// [`raw_len`]: #method.raw_len
     pub fn len(&self) -> Result<Integer> {
-        let lua = self.0.lua;
+        let lua = &self.0.lua;
         unsafe {
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 4);
@@ -343,7 +343,7 @@ impl<'lua> Table<'lua> {
 
     /// Returns the result of the Lua `#` operator, without invoking the `__len` metamethod.
     pub fn raw_len(&self) -> Integer {
-        let lua = self.0.lua;
+        let lua = &self.0.lua;
         unsafe {
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 1);
@@ -356,8 +356,8 @@ impl<'lua> Table<'lua> {
     /// Returns a reference to the metatable of this table, or `None` if no metatable is set.
     ///
     /// Unlike the `getmetatable` Lua function, this method ignores the `__metatable` field.
-    pub fn get_metatable(&self) -> Option<Table<'lua>> {
-        let lua = self.0.lua;
+    pub fn get_metatable(&self) -> Option<Table> {
+        let lua = &self.0.lua;
         unsafe {
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 1);
@@ -375,8 +375,8 @@ impl<'lua> Table<'lua> {
     ///
     /// If `metatable` is `None`, the metatable is removed (if no metatable is set, this does
     /// nothing).
-    pub fn set_metatable(&self, metatable: Option<Table<'lua>>) {
-        let lua = self.0.lua;
+    pub fn set_metatable(&self, metatable: Option<Table>) {
+        let lua = &self.0.lua;
         unsafe {
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 1);
@@ -423,7 +423,7 @@ impl<'lua> Table<'lua> {
     ///
     /// [`Result`]: type.Result.html
     /// [Lua manual]: http://www.lua.org/manual/5.3/manual.html#pdf-next
-    pub fn pairs<K: FromLua<'lua>, V: FromLua<'lua>>(self) -> TablePairs<'lua, K, V> {
+    pub fn pairs<K: FromLua, V: FromLua>(self) -> TablePairs<K, V> {
         TablePairs {
             table: self.0,
             next_key: Some(Nil),
@@ -472,7 +472,7 @@ impl<'lua> Table<'lua> {
     /// [`pairs`]: #method.pairs
     /// [`Result`]: type.Result.html
     /// [Lua manual]: http://www.lua.org/manual/5.3/manual.html#pdf-next
-    pub fn sequence_values<V: FromLua<'lua>>(self) -> TableSequence<'lua, V> {
+    pub fn sequence_values<V: FromLua>(self) -> TableSequence<V> {
         TableSequence {
             table: self.0,
             index: Some(1),
@@ -481,13 +481,13 @@ impl<'lua> Table<'lua> {
     }
 }
 
-impl<'lua> PartialEq for Table<'lua> {
+impl PartialEq for Table {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
 }
 
-impl<'lua> AsRef<Table<'lua>> for Table<'lua> {
+impl AsRef<Table> for Table {
     #[inline]
     fn as_ref(&self) -> &Self {
         self
@@ -499,22 +499,23 @@ impl<'lua> AsRef<Table<'lua>> for Table<'lua> {
 /// This struct is created by the [`Table::pairs`] method.
 ///
 /// [`Table::pairs`]: struct.Table.html#method.pairs
-pub struct TablePairs<'lua, K, V> {
-    table: LuaRef<'lua>,
-    next_key: Option<Value<'lua>>,
+pub struct TablePairs<K, V> {
+    table: LuaRef,
+    next_key: Option<Value>,
     _phantom: PhantomData<(K, V)>,
 }
 
-impl<'lua, K, V> Iterator for TablePairs<'lua, K, V>
+impl<K, V> Iterator for TablePairs<K, V>
 where
-    K: FromLua<'lua>,
-    V: FromLua<'lua>,
+    K: FromLua,
+    V: FromLua,
 {
     type Item = Result<(K, V)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(next_key) = self.next_key.take() {
-            let lua = self.table.lua;
+            let lua = self.table.lua.clone();
+            let lua = &lua;
 
             let res = (|| {
                 let res = unsafe {
@@ -561,21 +562,21 @@ where
 /// This struct is created by the [`Table::sequence_values`] method.
 ///
 /// [`Table::sequence_values`]: struct.Table.html#method.sequence_values
-pub struct TableSequence<'lua, V> {
-    table: LuaRef<'lua>,
+pub struct TableSequence<V> {
+    table: LuaRef,
     index: Option<Integer>,
     _phantom: PhantomData<V>,
 }
 
-impl<'lua, V> Iterator for TableSequence<'lua, V>
+impl<V> Iterator for TableSequence<V>
 where
-    V: FromLua<'lua>,
+    V: FromLua,
 {
     type Item = Result<V>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(index) = self.index.take() {
-            let lua = self.table.lua;
+            let lua = &self.table.lua;
 
             let res = unsafe {
                 let _sg = StackGuard::new(lua.state);

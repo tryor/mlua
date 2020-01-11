@@ -16,26 +16,26 @@ use crate::types::{LightUserData, Number};
 use crate::userdata::{AnyUserData, UserData};
 use crate::value::{FromLua, Nil, ToLua, Value};
 
-impl<'lua> ToLua<'lua> for Value<'lua> {
-    fn to_lua(self, _: &'lua Lua) -> Result<Value<'lua>> {
+impl ToLua for Value {
+    fn to_lua(self, _: &Lua) -> Result<Value> {
         Ok(self)
     }
 }
 
-impl<'lua> FromLua<'lua> for Value<'lua> {
-    fn from_lua(lua_value: Value<'lua>, _: &'lua Lua) -> Result<Self> {
+impl FromLua for Value {
+    fn from_lua(lua_value: Value, _: &Lua) -> Result<Self> {
         Ok(lua_value)
     }
 }
 
-impl<'lua> ToLua<'lua> for String<'lua> {
-    fn to_lua(self, _: &'lua Lua) -> Result<Value<'lua>> {
+impl ToLua for String {
+    fn to_lua(self, _: &Lua) -> Result<Value> {
         Ok(Value::String(self))
     }
 }
 
-impl<'lua> FromLua<'lua> for String<'lua> {
-    fn from_lua(value: Value<'lua>, lua: &'lua Lua) -> Result<String<'lua>> {
+impl FromLua for String {
+    fn from_lua(value: Value, lua: &Lua) -> Result<String> {
         let ty = value.type_name();
         lua.coerce_string(value)?
             .ok_or_else(|| Error::FromLuaConversionError {
@@ -46,14 +46,14 @@ impl<'lua> FromLua<'lua> for String<'lua> {
     }
 }
 
-impl<'lua> ToLua<'lua> for Table<'lua> {
-    fn to_lua(self, _: &'lua Lua) -> Result<Value<'lua>> {
+impl ToLua for Table {
+    fn to_lua(self, _: &Lua) -> Result<Value> {
         Ok(Value::Table(self))
     }
 }
 
-impl<'lua> FromLua<'lua> for Table<'lua> {
-    fn from_lua(value: Value<'lua>, _: &'lua Lua) -> Result<Table<'lua>> {
+impl FromLua for Table {
+    fn from_lua(value: Value, _: &Lua) -> Result<Table> {
         match value {
             Value::Table(table) => Ok(table),
             _ => Err(Error::FromLuaConversionError {
@@ -65,14 +65,14 @@ impl<'lua> FromLua<'lua> for Table<'lua> {
     }
 }
 
-impl<'lua> ToLua<'lua> for Function<'lua> {
-    fn to_lua(self, _: &'lua Lua) -> Result<Value<'lua>> {
+impl ToLua for Function {
+    fn to_lua(self, _: &Lua) -> Result<Value> {
         Ok(Value::Function(self))
     }
 }
 
-impl<'lua> FromLua<'lua> for Function<'lua> {
-    fn from_lua(value: Value<'lua>, _: &'lua Lua) -> Result<Function<'lua>> {
+impl FromLua for Function {
+    fn from_lua(value: Value, _: &Lua) -> Result<Function> {
         match value {
             Value::Function(table) => Ok(table),
             _ => Err(Error::FromLuaConversionError {
@@ -84,14 +84,14 @@ impl<'lua> FromLua<'lua> for Function<'lua> {
     }
 }
 
-impl<'lua> ToLua<'lua> for Thread<'lua> {
-    fn to_lua(self, _: &'lua Lua) -> Result<Value<'lua>> {
+impl ToLua for Thread {
+    fn to_lua(self, _: &Lua) -> Result<Value> {
         Ok(Value::Thread(self))
     }
 }
 
-impl<'lua> FromLua<'lua> for Thread<'lua> {
-    fn from_lua(value: Value<'lua>, _: &'lua Lua) -> Result<Thread<'lua>> {
+impl FromLua for Thread {
+    fn from_lua(value: Value, _: &Lua) -> Result<Thread> {
         match value {
             Value::Thread(t) => Ok(t),
             _ => Err(Error::FromLuaConversionError {
@@ -103,14 +103,14 @@ impl<'lua> FromLua<'lua> for Thread<'lua> {
     }
 }
 
-impl<'lua> ToLua<'lua> for AnyUserData<'lua> {
-    fn to_lua(self, _: &'lua Lua) -> Result<Value<'lua>> {
+impl ToLua for AnyUserData {
+    fn to_lua(self, _: &Lua) -> Result<Value> {
         Ok(Value::UserData(self))
     }
 }
 
-impl<'lua> FromLua<'lua> for AnyUserData<'lua> {
-    fn from_lua(value: Value<'lua>, _: &'lua Lua) -> Result<AnyUserData<'lua>> {
+impl FromLua for AnyUserData {
+    fn from_lua(value: Value, _: &Lua) -> Result<AnyUserData> {
         match value {
             Value::UserData(ud) => Ok(ud),
             _ => Err(Error::FromLuaConversionError {
@@ -122,14 +122,14 @@ impl<'lua> FromLua<'lua> for AnyUserData<'lua> {
     }
 }
 
-impl<'lua, T: 'static + Send + UserData> ToLua<'lua> for T {
-    fn to_lua(self, lua: &'lua Lua) -> Result<Value<'lua>> {
+impl<T: 'static + Send + UserData> ToLua for T {
+    fn to_lua(self, lua: &Lua) -> Result<Value> {
         Ok(Value::UserData(lua.create_userdata(self)?))
     }
 }
 
-impl<'lua, T: 'static + UserData + Clone> FromLua<'lua> for T {
-    fn from_lua(value: Value<'lua>, _: &'lua Lua) -> Result<T> {
+impl<T: 'static + UserData + Clone> FromLua for T {
+    fn from_lua(value: Value, _: &Lua) -> Result<T> {
         match value {
             Value::UserData(ud) => Ok(ud.borrow::<T>()?.clone()),
             _ => Err(Error::FromLuaConversionError {
@@ -141,14 +141,14 @@ impl<'lua, T: 'static + UserData + Clone> FromLua<'lua> for T {
     }
 }
 
-impl<'lua> ToLua<'lua> for Error {
-    fn to_lua(self, _: &'lua Lua) -> Result<Value<'lua>> {
+impl ToLua for Error {
+    fn to_lua(self, _: &Lua) -> Result<Value> {
         Ok(Value::Error(self))
     }
 }
 
-impl<'lua> FromLua<'lua> for Error {
-    fn from_lua(value: Value<'lua>, lua: &'lua Lua) -> Result<Error> {
+impl FromLua for Error {
+    fn from_lua(value: Value, lua: &Lua) -> Result<Error> {
         match value {
             Value::Error(err) => Ok(err),
             val => Ok(Error::RuntimeError(
@@ -160,14 +160,14 @@ impl<'lua> FromLua<'lua> for Error {
     }
 }
 
-impl<'lua> ToLua<'lua> for bool {
-    fn to_lua(self, _: &'lua Lua) -> Result<Value<'lua>> {
+impl ToLua for bool {
+    fn to_lua(self, _: &Lua) -> Result<Value> {
         Ok(Value::Boolean(self))
     }
 }
 
-impl<'lua> FromLua<'lua> for bool {
-    fn from_lua(v: Value, _: &'lua Lua) -> Result<Self> {
+impl FromLua for bool {
+    fn from_lua(v: Value, _: &Lua) -> Result<Self> {
         match v {
             Value::Nil => Ok(false),
             Value::Boolean(b) => Ok(b),
@@ -176,14 +176,14 @@ impl<'lua> FromLua<'lua> for bool {
     }
 }
 
-impl<'lua> ToLua<'lua> for LightUserData {
-    fn to_lua(self, _: &'lua Lua) -> Result<Value<'lua>> {
+impl ToLua for LightUserData {
+    fn to_lua(self, _: &Lua) -> Result<Value> {
         Ok(Value::LightUserData(self))
     }
 }
 
-impl<'lua> FromLua<'lua> for LightUserData {
-    fn from_lua(value: Value, _: &'lua Lua) -> Result<Self> {
+impl FromLua for LightUserData {
+    fn from_lua(value: Value, _: &Lua) -> Result<Self> {
         match value {
             Value::LightUserData(ud) => Ok(ud),
             _ => Err(Error::FromLuaConversionError {
@@ -195,14 +195,14 @@ impl<'lua> FromLua<'lua> for LightUserData {
     }
 }
 
-impl<'lua> ToLua<'lua> for StdString {
-    fn to_lua(self, lua: &'lua Lua) -> Result<Value<'lua>> {
+impl ToLua for StdString {
+    fn to_lua(self, lua: &Lua) -> Result<Value> {
         Ok(Value::String(lua.create_string(&self)?))
     }
 }
 
-impl<'lua> FromLua<'lua> for StdString {
-    fn from_lua(value: Value<'lua>, lua: &'lua Lua) -> Result<Self> {
+impl FromLua for StdString {
+    fn from_lua(value: Value, lua: &Lua) -> Result<Self> {
         let ty = value.type_name();
         Ok(lua
             .coerce_string(value)?
@@ -216,20 +216,20 @@ impl<'lua> FromLua<'lua> for StdString {
     }
 }
 
-impl<'lua, 'a> ToLua<'lua> for &'a str {
-    fn to_lua(self, lua: &'lua Lua) -> Result<Value<'lua>> {
+impl<'a> ToLua for &'a str {
+    fn to_lua(self, lua: &Lua) -> Result<Value> {
         Ok(Value::String(lua.create_string(self)?))
     }
 }
 
-impl<'lua> ToLua<'lua> for CString {
-    fn to_lua(self, lua: &'lua Lua) -> Result<Value<'lua>> {
+impl ToLua for CString {
+    fn to_lua(self, lua: &Lua) -> Result<Value> {
         Ok(Value::String(lua.create_string(self.as_bytes())?))
     }
 }
 
-impl<'lua> FromLua<'lua> for CString {
-    fn from_lua(value: Value<'lua>, lua: &'lua Lua) -> Result<Self> {
+impl FromLua for CString {
+    fn from_lua(value: Value, lua: &Lua) -> Result<Self> {
         let ty = value.type_name();
         let string = lua
             .coerce_string(value)?
@@ -250,20 +250,20 @@ impl<'lua> FromLua<'lua> for CString {
     }
 }
 
-impl<'lua, 'a> ToLua<'lua> for &'a CStr {
-    fn to_lua(self, lua: &'lua Lua) -> Result<Value<'lua>> {
+impl<'a> ToLua for &'a CStr {
+    fn to_lua(self, lua: &Lua) -> Result<Value> {
         Ok(Value::String(lua.create_string(self.to_bytes())?))
     }
 }
 
-impl<'lua, 'a> ToLua<'lua> for BString {
-    fn to_lua(self, lua: &'lua Lua) -> Result<Value<'lua>> {
+impl<'a> ToLua for BString {
+    fn to_lua(self, lua: &Lua) -> Result<Value> {
         Ok(Value::String(lua.create_string(&self)?))
     }
 }
 
-impl<'lua> FromLua<'lua> for BString {
-    fn from_lua(value: Value<'lua>, lua: &'lua Lua) -> Result<Self> {
+impl FromLua for BString {
+    fn from_lua(value: Value, lua: &Lua) -> Result<Self> {
         let ty = value.type_name();
         Ok(BString::from(
             lua.coerce_string(value)?
@@ -278,16 +278,16 @@ impl<'lua> FromLua<'lua> for BString {
     }
 }
 
-impl<'lua, 'a> ToLua<'lua> for &BStr {
-    fn to_lua(self, lua: &'lua Lua) -> Result<Value<'lua>> {
+impl<'a> ToLua for &BStr {
+    fn to_lua(self, lua: &Lua) -> Result<Value> {
         Ok(Value::String(lua.create_string(&self)?))
     }
 }
 
 macro_rules! lua_convert_int {
     ($x:ty) => {
-        impl<'lua> ToLua<'lua> for $x {
-            fn to_lua(self, _: &'lua Lua) -> Result<Value<'lua>> {
+        impl ToLua for $x {
+            fn to_lua(self, _: &Lua) -> Result<Value> {
                 if let Some(i) = cast(self) {
                     Ok(Value::Integer(i))
                 } else {
@@ -302,8 +302,8 @@ macro_rules! lua_convert_int {
             }
         }
 
-        impl<'lua> FromLua<'lua> for $x {
-            fn from_lua(value: Value<'lua>, lua: &'lua Lua) -> Result<Self> {
+        impl FromLua for $x {
+            fn from_lua(value: Value, lua: &Lua) -> Result<Self> {
                 let ty = value.type_name();
                 (if let Some(i) = lua.coerce_integer(value.clone())? {
                     cast(i)
@@ -343,14 +343,14 @@ lua_convert_int!(usize);
 
 macro_rules! lua_convert_float {
     ($x:ty) => {
-        impl<'lua> ToLua<'lua> for $x {
-            fn to_lua(self, _: &'lua Lua) -> Result<Value<'lua>> {
+        impl ToLua for $x {
+            fn to_lua(self, _: &Lua) -> Result<Value> {
                 Ok(Value::Number(self as Number))
             }
         }
 
-        impl<'lua> FromLua<'lua> for $x {
-            fn from_lua(value: Value<'lua>, lua: &'lua Lua) -> Result<Self> {
+        impl FromLua for $x {
+            fn from_lua(value: Value, lua: &Lua) -> Result<Self> {
                 let ty = value.type_name();
                 lua.coerce_number(value)?
                     .ok_or_else(|| Error::FromLuaConversionError {
@@ -373,14 +373,14 @@ macro_rules! lua_convert_float {
 lua_convert_float!(f32);
 lua_convert_float!(f64);
 
-impl<'lua, T: ToLua<'lua>> ToLua<'lua> for Vec<T> {
-    fn to_lua(self, lua: &'lua Lua) -> Result<Value<'lua>> {
+impl<T: ToLua> ToLua for Vec<T> {
+    fn to_lua(self, lua: &Lua) -> Result<Value> {
         Ok(Value::Table(lua.create_sequence_from(self)?))
     }
 }
 
-impl<'lua, T: FromLua<'lua>> FromLua<'lua> for Vec<T> {
-    fn from_lua(value: Value<'lua>, _: &'lua Lua) -> Result<Self> {
+impl<T: FromLua> FromLua for Vec<T> {
+    fn from_lua(value: Value, _: &Lua) -> Result<Self> {
         if let Value::Table(table) = value {
             table.sequence_values().collect()
         } else {
@@ -393,18 +393,18 @@ impl<'lua, T: FromLua<'lua>> FromLua<'lua> for Vec<T> {
     }
 }
 
-impl<'lua, K: Eq + Hash + ToLua<'lua>, V: ToLua<'lua>, S: BuildHasher> ToLua<'lua>
+impl<K: Eq + Hash + ToLua, V: ToLua, S: BuildHasher> ToLua
     for HashMap<K, V, S>
 {
-    fn to_lua(self, lua: &'lua Lua) -> Result<Value<'lua>> {
+    fn to_lua(self, lua: &Lua) -> Result<Value> {
         Ok(Value::Table(lua.create_table_from(self)?))
     }
 }
 
-impl<'lua, K: Eq + Hash + FromLua<'lua>, V: FromLua<'lua>, S: BuildHasher + Default> FromLua<'lua>
+impl<K: Eq + Hash + FromLua, V: FromLua, S: BuildHasher + Default> FromLua
     for HashMap<K, V, S>
 {
-    fn from_lua(value: Value<'lua>, _: &'lua Lua) -> Result<Self> {
+    fn from_lua(value: Value, _: &Lua) -> Result<Self> {
         if let Value::Table(table) = value {
             table.pairs().collect()
         } else {
@@ -417,14 +417,14 @@ impl<'lua, K: Eq + Hash + FromLua<'lua>, V: FromLua<'lua>, S: BuildHasher + Defa
     }
 }
 
-impl<'lua, K: Ord + ToLua<'lua>, V: ToLua<'lua>> ToLua<'lua> for BTreeMap<K, V> {
-    fn to_lua(self, lua: &'lua Lua) -> Result<Value<'lua>> {
+impl<K: Ord + ToLua, V: ToLua> ToLua for BTreeMap<K, V> {
+    fn to_lua(self, lua: &Lua) -> Result<Value> {
         Ok(Value::Table(lua.create_table_from(self)?))
     }
 }
 
-impl<'lua, K: Ord + FromLua<'lua>, V: FromLua<'lua>> FromLua<'lua> for BTreeMap<K, V> {
-    fn from_lua(value: Value<'lua>, _: &'lua Lua) -> Result<Self> {
+impl<K: Ord + FromLua, V: FromLua> FromLua for BTreeMap<K, V> {
+    fn from_lua(value: Value, _: &Lua) -> Result<Self> {
         if let Value::Table(table) = value {
             table.pairs().collect()
         } else {
@@ -437,8 +437,8 @@ impl<'lua, K: Ord + FromLua<'lua>, V: FromLua<'lua>> FromLua<'lua> for BTreeMap<
     }
 }
 
-impl<'lua, T: ToLua<'lua>> ToLua<'lua> for Option<T> {
-    fn to_lua(self, lua: &'lua Lua) -> Result<Value<'lua>> {
+impl<T: ToLua> ToLua for Option<T> {
+    fn to_lua(self, lua: &Lua) -> Result<Value> {
         match self {
             Some(val) => val.to_lua(lua),
             None => Ok(Nil),
@@ -446,8 +446,8 @@ impl<'lua, T: ToLua<'lua>> ToLua<'lua> for Option<T> {
     }
 }
 
-impl<'lua, T: FromLua<'lua>> FromLua<'lua> for Option<T> {
-    fn from_lua(value: Value<'lua>, lua: &'lua Lua) -> Result<Self> {
+impl<T: FromLua> FromLua for Option<T> {
+    fn from_lua(value: Value, lua: &Lua) -> Result<Self> {
         match value {
             Nil => Ok(None),
             value => Ok(Some(T::from_lua(value, lua)?)),

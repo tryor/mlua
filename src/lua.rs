@@ -27,6 +27,7 @@ use crate::util::{
 use crate::value::{FromLua, FromLuaMulti, MultiValue, Nil, ToLua, ToLuaMulti, Value};
 
 /// Top level Lua struct which holds the Lua state itself.
+#[derive(Clone)]
 pub struct Lua {
     pub(crate) state: *mut ffi::lua_State,
     main_state: *mut ffi::lua_State,
@@ -52,7 +53,7 @@ unsafe impl Send for Lua {}
 impl Drop for Lua {
     fn drop(&mut self) {
         unsafe {
-            if !self.ephemeral {
+            if !self.ephemeral && Arc::strong_count(&self.extra) == 1 {
                 let mut extra = self.extra.borrow_mut();
                 mlua_debug_assert!(
                     ffi::lua_gettop(extra.ref_thread) == extra.ref_stack_max
@@ -203,12 +204,12 @@ impl Lua {
     // Executes module entrypoint function, which returns only one Value.
     // The returned value then pushed to the Lua stack.
     #[doc(hidden)]
-    pub fn entrypoint1<'lua, 'callback, R, F>(&'lua self, func: F) -> Result<c_int>
+    pub fn entrypoint1<R, F>(&self, func: F) -> Result<c_int>
     where
-        R: ToLua<'callback>,
-        F: 'static + Send + Fn(&'callback Lua) -> Result<R>,
+        R: ToLua,
+        F: 'static + Send + Fn(Lua) -> Result<R>,
     {
-        let cb = self.create_callback(Box::new(move |lua, _| func(lua)?.to_lua_multi(lua)))?;
+        let cb = self.create_callback(Box::new(move |lua, _| func(lua.clone())?.to_lua_multi(&lua)))?;
         unsafe { self.push_value(cb.call(())?).map(|_| 1) }
     }
 
@@ -290,24 +291,24 @@ impl Lua {
     /// called.
     ///
     /// [`Chunk::exec`]: struct.Chunk.html#method.exec
-    pub fn load<'lua, 'a, S>(&'lua self, source: &'a S) -> Chunk<'lua, 'a>
+    pub fn load<'a, S>(&self, source: &'a S) -> Chunk<'a>
     where
         S: ?Sized + AsRef<[u8]>,
     {
         Chunk {
-            lua: self,
+            lua: self.clone(),
             source: source.as_ref(),
             name: None,
             env: None,
         }
     }
 
-    fn load_chunk<'lua>(
-        &'lua self,
+    fn load_chunk(
+        &self,
         source: &[u8],
         name: Option<&CString>,
-        env: Option<Value<'lua>>,
-    ) -> Result<Function<'lua>> {
+        env: Option<Value>,
+    ) -> Result<Function> {
         unsafe {
             let _sg = StackGuard::new(self.state);
             assert_stack(self.state, 1);
@@ -374,10 +375,10 @@ impl Lua {
     }
 
     /// Creates a table and fills it with values from an iterator.
-    pub fn create_table_from<'lua, K, V, I>(&'lua self, cont: I) -> Result<Table<'lua>>
+    pub fn create_table_from<K, V, I>(&self, cont: I) -> Result<Table>
     where
-        K: ToLua<'lua>,
-        V: ToLua<'lua>,
+        K: ToLua,
+        V: ToLua,
         I: IntoIterator<Item = (K, V)>,
     {
         unsafe {
@@ -406,9 +407,9 @@ impl Lua {
     }
 
     /// Creates a table from an iterator of values, using `1..` as the keys.
-    pub fn create_sequence_from<'lua, T, I>(&'lua self, cont: I) -> Result<Table<'lua>>
+    pub fn create_sequence_from<T, I>(&self, cont: I) -> Result<Table>
     where
-        T: ToLua<'lua>,
+        T: ToLua,
         I: IntoIterator<Item = T>,
     {
         self.create_table_from(cont.into_iter().enumerate().map(|(k, v)| (k + 1, v)))
@@ -459,11 +460,11 @@ impl Lua {
     ///
     /// [`ToLua`]: trait.ToLua.html
     /// [`ToLuaMulti`]: trait.ToLuaMulti.html
-    pub fn create_function<'lua, 'callback, A, R, F>(&'lua self, func: F) -> Result<Function<'lua>>
+    pub fn create_function<A, R, F>(&self, func: F) -> Result<Function>
     where
-        A: FromLuaMulti<'callback>,
-        R: ToLuaMulti<'callback>,
-        F: 'static + Send + Fn(&'callback Lua, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + Fn(&Lua, A) -> Result<R>,
     {
         self.create_callback(Box::new(move |lua, args| {
             func(lua, A::from_lua_multi(args, lua)?)?.to_lua_multi(lua)
@@ -476,14 +477,14 @@ impl Lua {
     /// [`create_function`] for more information about the implementation.
     ///
     /// [`create_function`]: #method.create_function
-    pub fn create_function_mut<'lua, 'callback, A, R, F>(
-        &'lua self,
+    pub fn create_function_mut<A, R, F>(
+        &self,
         func: F,
-    ) -> Result<Function<'lua>>
+    ) -> Result<Function>
     where
-        A: FromLuaMulti<'callback>,
-        R: ToLuaMulti<'callback>,
-        F: 'static + Send + FnMut(&'callback Lua, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + FnMut(&Lua, A) -> Result<R>,
     {
         let func = RefCell::new(func);
         self.create_function(move |lua, args| {
@@ -496,7 +497,7 @@ impl Lua {
     /// Wraps a Lua function into a new thread (or coroutine).
     ///
     /// Equivalent to `coroutine.create`.
-    pub fn create_thread<'lua>(&'lua self, func: Function<'lua>) -> Result<Thread<'lua>> {
+    pub fn create_thread(&self, func: Function) -> Result<Thread> {
         unsafe {
             let _sg = StackGuard::new(self.state);
             assert_stack(self.state, 2);
@@ -533,7 +534,7 @@ impl Lua {
 
     /// Returns a handle to the active `Thread`.  For calls to `Lua` this will be the main Lua thread,
     /// for parameters given to a callback, this will be whatever Lua thread called the callback.
-    pub fn current_thread<'lua>(&'lua self) -> Thread<'lua> {
+    pub fn current_thread(&self) -> Thread {
         unsafe {
             ffi::lua_pushthread(self.state);
             Thread(self.pop_ref())
@@ -560,9 +561,9 @@ impl Lua {
     /// dropped.  `Function` types will error when called, and `AnyUserData` will be typeless.  It
     /// would be impossible to prevent handles to scoped values from escaping anyway, since you
     /// would always be able to smuggle them through Lua state.
-    pub fn scope<'scope, 'lua: 'scope, F, R>(&'lua self, f: F) -> R
+    pub fn scope<'scope, F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&Scope<'lua, 'scope>) -> R,
+        F: FnOnce(&Scope<'scope>) -> R,
     {
         f(&Scope::new(self))
     }
@@ -572,7 +573,7 @@ impl Lua {
     ///
     /// To succeed, the value must be a string (in which case this is a no-op), an integer, or a
     /// number.
-    pub fn coerce_string<'lua>(&'lua self, v: Value<'lua>) -> Result<Option<String<'lua>>> {
+    pub fn coerce_string(&self, v: Value) -> Result<Option<String>> {
         Ok(match v {
             Value::String(s) => Some(s),
             v => unsafe {
@@ -641,24 +642,24 @@ impl Lua {
     }
 
     /// Converts a value that implements `ToLua` into a `Value` instance.
-    pub fn pack<'lua, T: ToLua<'lua>>(&'lua self, t: T) -> Result<Value<'lua>> {
+    pub fn pack<T: ToLua>(&self, t: T) -> Result<Value> {
         t.to_lua(self)
     }
 
     /// Converts a `Value` instance into a value that implements `FromLua`.
-    pub fn unpack<'lua, T: FromLua<'lua>>(&'lua self, value: Value<'lua>) -> Result<T> {
+    pub fn unpack<T: FromLua>(&self, value: Value) -> Result<T> {
         T::from_lua(value, self)
     }
 
     /// Converts a value that implements `ToLuaMulti` into a `MultiValue` instance.
-    pub fn pack_multi<'lua, T: ToLuaMulti<'lua>>(&'lua self, t: T) -> Result<MultiValue<'lua>> {
+    pub fn pack_multi<T: ToLuaMulti>(&self, t: T) -> Result<MultiValue> {
         t.to_lua_multi(self)
     }
 
     /// Converts a `MultiValue` instance into a value that implements `FromLuaMulti`.
-    pub fn unpack_multi<'lua, T: FromLuaMulti<'lua>>(
-        &'lua self,
-        value: MultiValue<'lua>,
+    pub fn unpack_multi<T: FromLuaMulti>(
+        &self,
+        value: MultiValue,
     ) -> Result<T> {
         T::from_lua_multi(value, self)
     }
@@ -667,10 +668,10 @@ impl Lua {
     ///
     /// This value will be available to rust from all `Lua` instances which share the same main
     /// state.
-    pub fn set_named_registry_value<'lua, S, T>(&'lua self, name: &S, t: T) -> Result<()>
+    pub fn set_named_registry_value<S, T>(&self, name: &S, t: T) -> Result<()>
     where
         S: ?Sized + AsRef<[u8]>,
-        T: ToLua<'lua>,
+        T: ToLua,
     {
         let t = t.to_lua(self)?;
         unsafe {
@@ -694,10 +695,10 @@ impl Lua {
     /// get a value previously set by [`set_named_registry_value`].
     ///
     /// [`set_named_registry_value`]: #method.set_named_registry_value
-    pub fn named_registry_value<'lua, S, T>(&'lua self, name: &S) -> Result<T>
+    pub fn named_registry_value<S, T>(&self, name: &S) -> Result<T>
     where
         S: ?Sized + AsRef<[u8]>,
-        T: FromLua<'lua>,
+        T: FromLua,
     {
         let value = unsafe {
             let _sg = StackGuard::new(self.state);
@@ -720,7 +721,7 @@ impl Lua {
     /// Equivalent to calling [`set_named_registry_value`] with a value of Nil.
     ///
     /// [`set_named_registry_value`]: #method.set_named_registry_value
-    pub fn unset_named_registry_value<'lua, S>(&'lua self, name: &S) -> Result<()>
+    pub fn unset_named_registry_value<S>(&self, name: &S) -> Result<()>
     where
         S: ?Sized + AsRef<[u8]>,
     {
@@ -736,7 +737,7 @@ impl Lua {
     /// [`RegistryKey`] for more details.
     ///
     /// [`RegistryKey`]: struct.RegistryKey.html
-    pub fn create_registry_value<'lua, T: ToLua<'lua>>(&'lua self, t: T) -> Result<RegistryKey> {
+    pub fn create_registry_value<T: ToLua>(&self, t: T) -> Result<RegistryKey> {
         let t = t.to_lua(self)?;
         unsafe {
             let _sg = StackGuard::new(self.state);
@@ -760,7 +761,7 @@ impl Lua {
     /// previously placed by [`create_registry_value`].
     ///
     /// [`create_registry_value`]: #method.create_registry_value
-    pub fn registry_value<'lua, T: FromLua<'lua>>(&'lua self, key: &RegistryKey) -> Result<T> {
+    pub fn registry_value<T: FromLua>(&self, key: &RegistryKey) -> Result<T> {
         let value = unsafe {
             if !self.owns_registry_value(key) {
                 return Err(Error::MismatchedRegistryKey);
@@ -937,7 +938,7 @@ impl Lua {
     }
 
     // Pushes a LuaRef value onto the stack, uses 1 stack space, does not call checkstack
-    pub(crate) unsafe fn push_ref<'lua>(&'lua self, lref: &LuaRef<'lua>) {
+    pub(crate) unsafe fn push_ref(&self, lref: &LuaRef) {
         assert!(
             lref.lua.main_state == self.main_state,
             "Lua instance passed Value created from a different main Lua state"
@@ -956,23 +957,23 @@ impl Lua {
     // used stack.  The implementation is somewhat biased towards the use case of a relatively small
     // number of short term references being created, and `RegistryKey` being used for long term
     // references.
-    pub(crate) unsafe fn pop_ref<'lua>(&'lua self) -> LuaRef<'lua> {
+    pub(crate) unsafe fn pop_ref(&self) -> LuaRef {
         let mut extra = self.extra.borrow_mut();
         ffi::lua_xmove(self.state, extra.ref_thread, 1);
         let index = ref_stack_pop(&mut extra);
-        LuaRef { lua: self, index }
+        LuaRef { lua: self.clone(), index }
     }
 
-    pub(crate) fn clone_ref<'lua>(&'lua self, lref: &LuaRef<'lua>) -> LuaRef<'lua> {
+    pub(crate) fn clone_ref(&self, lref: &LuaRef) -> LuaRef {
         unsafe {
             let mut extra = self.extra.borrow_mut();
             ffi::lua_pushvalue(extra.ref_thread, lref.index);
             let index = ref_stack_pop(&mut extra);
-            LuaRef { lua: self, index }
+            LuaRef { lua: self.clone(), index }
         }
     }
 
-    pub(crate) fn drop_ref<'lua>(&'lua self, lref: &mut LuaRef<'lua>) {
+    pub(crate) fn drop_ref(&self, lref: &mut LuaRef) {
         unsafe {
             let mut extra = self.extra.borrow_mut();
             ffi::lua_pushnil(extra.ref_thread);
@@ -1043,14 +1044,14 @@ impl Lua {
     // Fn is 'static, otherwise it could capture 'callback arguments improperly.  Without ATCs, we
     // cannot easily deal with the "correct" callback type of:
     //
-    // Box<for<'lua> Fn(&'lua Lua, MultiValue<'lua>) -> Result<MultiValue<'lua>>)>
+    // Box<for Fn(Rc<Lua>, MultiValue) -> Result<MultiValue>)>
     //
     // So we instead use a caller provided lifetime, which without the 'static requirement would be
     // unsafe.
-    pub(crate) fn create_callback<'lua, 'callback>(
-        &'lua self,
-        func: Callback<'callback, 'static>,
-    ) -> Result<Function<'lua>> {
+    pub(crate) fn create_callback<'callback>(
+        &self,
+        func: Callback<'static>,
+    ) -> Result<Function> {
         unsafe extern "C" fn call_callback(state: *mut ffi::lua_State) -> c_int {
             callback_error(state, |nargs| {
                 if ffi::lua_type(state, ffi::lua_upvalueindex(1)) == ffi::LUA_TNIL {
@@ -1149,16 +1150,16 @@ impl Lua {
 ///
 /// [`Lua::load`]: struct.Lua.html#method.load
 #[must_use = "`Chunk`s do nothing unless one of `exec`, `eval`, `call`, or `into_function` are called on them"]
-pub struct Chunk<'lua, 'a> {
-    lua: &'lua Lua,
+pub struct Chunk<'a> {
+    lua: Lua,
     source: &'a [u8],
     name: Option<CString>,
-    env: Option<Value<'lua>>,
+    env: Option<Value>,
 }
 
-impl<'lua, 'a> Chunk<'lua, 'a> {
+impl<'a> Chunk<'a> {
     /// Sets the name of this chunk, which results in more informative error traces.
-    pub fn set_name<S: ?Sized + AsRef<[u8]>>(mut self, name: &S) -> Result<Chunk<'lua, 'a>> {
+    pub fn set_name<S: ?Sized + AsRef<[u8]>>(mut self, name: &S) -> Result<Chunk<'a>> {
         let name =
             CString::new(name.as_ref().to_vec()).map_err(|e| Error::ToLuaConversionError {
                 from: "&str",
@@ -1180,8 +1181,8 @@ impl<'lua, 'a> Chunk<'lua, 'a> {
     /// All global variables (including the standard library!) are looked up in `_ENV`, so it may be
     /// necessary to populate the environment in order for scripts using custom environments to be
     /// useful.
-    pub fn set_environment<V: ToLua<'lua>>(mut self, env: V) -> Result<Chunk<'lua, 'a>> {
-        self.env = Some(env.to_lua(self.lua)?);
+    pub fn set_environment<V: ToLua>(mut self, env: V) -> Result<Chunk<'a>> {
+        self.env = Some(env.to_lua(&self.lua)?);
         Ok(self)
     }
 
@@ -1198,7 +1199,7 @@ impl<'lua, 'a> Chunk<'lua, 'a> {
     /// If the chunk can be parsed as an expression, this loads and executes the chunk and returns
     /// the value that it evaluates to.  Otherwise, the chunk is interpreted as a block as normal,
     /// and this is equivalent to calling `exec`.
-    pub fn eval<R: FromLuaMulti<'lua>>(self) -> Result<R> {
+    pub fn eval<R: FromLuaMulti>(self) -> Result<R> {
         // First, try interpreting the lua as an expression by adding
         // "return", then as a statement.  This is the same thing the
         // actual lua repl does.
@@ -1217,14 +1218,14 @@ impl<'lua, 'a> Chunk<'lua, 'a> {
     /// Load the chunk function and call it with the given arguemnts.
     ///
     /// This is equivalent to `into_function` and calling the resulting function.
-    pub fn call<A: ToLuaMulti<'lua>, R: FromLuaMulti<'lua>>(self, args: A) -> Result<R> {
+    pub fn call<A: ToLuaMulti, R: FromLuaMulti>(self, args: A) -> Result<R> {
         self.into_function()?.call(args)
     }
 
     /// Load this chunk into a regular `Function`.
     ///
     /// This simply compiles the chunk without actually executing it.
-    pub fn into_function(self) -> Result<Function<'lua>> {
+    pub fn into_function(self) -> Result<Function> {
         self.lua
             .load_chunk(self.source, self.name.as_ref(), self.env)
     }
@@ -1346,14 +1347,14 @@ unsafe fn ref_stack_pop(extra: &mut ExtraData) -> c_int {
 static FUNCTION_CALLBACK_METATABLE_REGISTRY_KEY: u8 = 0;
 static FUNCTION_EXTRA_METATABLE_REGISTRY_KEY: u8 = 0;
 
-struct StaticUserDataMethods<'lua, T: 'static + UserData> {
-    methods: Vec<(Vec<u8>, Callback<'lua, 'static>)>,
-    meta_methods: Vec<(MetaMethod, Callback<'lua, 'static>)>,
+struct StaticUserDataMethods<T: 'static + UserData> {
+    methods: Vec<(Vec<u8>, Callback<'static>)>,
+    meta_methods: Vec<(MetaMethod, Callback<'static>)>,
     _type: PhantomData<T>,
 }
 
-impl<'lua, T: 'static + UserData> Default for StaticUserDataMethods<'lua, T> {
-    fn default() -> StaticUserDataMethods<'lua, T> {
+impl<T: 'static + UserData> Default for StaticUserDataMethods<T> {
+    fn default() -> StaticUserDataMethods<T> {
         StaticUserDataMethods {
             methods: Vec::new(),
             meta_methods: Vec::new(),
@@ -1362,13 +1363,13 @@ impl<'lua, T: 'static + UserData> Default for StaticUserDataMethods<'lua, T> {
     }
 }
 
-impl<'lua, T: 'static + UserData> UserDataMethods<'lua, T> for StaticUserDataMethods<'lua, T> {
+impl<T: 'static + UserData> UserDataMethods<T> for StaticUserDataMethods<T> {
     fn add_method<S, A, R, M>(&mut self, name: &S, method: M)
     where
         S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        M: 'static + Send + Fn(&'lua Lua, &T, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Send + Fn(&Lua, &T, A) -> Result<R>,
     {
         self.methods
             .push((name.as_ref().to_vec(), Self::box_method(method)));
@@ -1377,9 +1378,9 @@ impl<'lua, T: 'static + UserData> UserDataMethods<'lua, T> for StaticUserDataMet
     fn add_method_mut<S, A, R, M>(&mut self, name: &S, method: M)
     where
         S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        M: 'static + Send + FnMut(&'lua Lua, &mut T, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Send + FnMut(&Lua, &mut T, A) -> Result<R>,
     {
         self.methods
             .push((name.as_ref().to_vec(), Self::box_method_mut(method)));
@@ -1388,9 +1389,9 @@ impl<'lua, T: 'static + UserData> UserDataMethods<'lua, T> for StaticUserDataMet
     fn add_function<S, A, R, F>(&mut self, name: &S, function: F)
     where
         S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        F: 'static + Send + Fn(&'lua Lua, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + Fn(&Lua, A) -> Result<R>,
     {
         self.methods
             .push((name.as_ref().to_vec(), Self::box_function(function)));
@@ -1399,9 +1400,9 @@ impl<'lua, T: 'static + UserData> UserDataMethods<'lua, T> for StaticUserDataMet
     fn add_function_mut<S, A, R, F>(&mut self, name: &S, function: F)
     where
         S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        F: 'static + Send + FnMut(&'lua Lua, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + FnMut(&Lua, A) -> Result<R>,
     {
         self.methods
             .push((name.as_ref().to_vec(), Self::box_function_mut(function)));
@@ -1409,48 +1410,48 @@ impl<'lua, T: 'static + UserData> UserDataMethods<'lua, T> for StaticUserDataMet
 
     fn add_meta_method<A, R, M>(&mut self, meta: MetaMethod, method: M)
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        M: 'static + Send + Fn(&'lua Lua, &T, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Send + Fn(&Lua, &T, A) -> Result<R>,
     {
         self.meta_methods.push((meta, Self::box_method(method)));
     }
 
     fn add_meta_method_mut<A, R, M>(&mut self, meta: MetaMethod, method: M)
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        M: 'static + Send + FnMut(&'lua Lua, &mut T, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Send + FnMut(&Lua, &mut T, A) -> Result<R>,
     {
         self.meta_methods.push((meta, Self::box_method_mut(method)));
     }
 
     fn add_meta_function<A, R, F>(&mut self, meta: MetaMethod, function: F)
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        F: 'static + Send + Fn(&'lua Lua, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + Fn(&Lua, A) -> Result<R>,
     {
         self.meta_methods.push((meta, Self::box_function(function)));
     }
 
     fn add_meta_function_mut<A, R, F>(&mut self, meta: MetaMethod, function: F)
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        F: 'static + Send + FnMut(&'lua Lua, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + FnMut(&Lua, A) -> Result<R>,
     {
         self.meta_methods
             .push((meta, Self::box_function_mut(function)));
     }
 }
 
-impl<'lua, T: 'static + UserData> StaticUserDataMethods<'lua, T> {
-    fn box_method<A, R, M>(method: M) -> Callback<'lua, 'static>
+impl<T: 'static + UserData> StaticUserDataMethods<T> {
+    fn box_method<A, R, M>(method: M) -> Callback<'static>
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        M: 'static + Send + Fn(&'lua Lua, &T, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Send + Fn(&Lua, &T, A) -> Result<R>,
     {
         Box::new(move |lua, mut args| {
             if let Some(front) = args.pop_front() {
@@ -1467,11 +1468,11 @@ impl<'lua, T: 'static + UserData> StaticUserDataMethods<'lua, T> {
         })
     }
 
-    fn box_method_mut<A, R, M>(method: M) -> Callback<'lua, 'static>
+    fn box_method_mut<A, R, M>(method: M) -> Callback<'static>
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        M: 'static + Send + FnMut(&'lua Lua, &mut T, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Send + FnMut(&Lua, &mut T, A) -> Result<R>,
     {
         let method = RefCell::new(method);
         Box::new(move |lua, mut args| {
@@ -1492,20 +1493,20 @@ impl<'lua, T: 'static + UserData> StaticUserDataMethods<'lua, T> {
         })
     }
 
-    fn box_function<A, R, F>(function: F) -> Callback<'lua, 'static>
+    fn box_function<A, R, F>(function: F) -> Callback<'static>
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        F: 'static + Send + Fn(&'lua Lua, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + Fn(&Lua, A) -> Result<R>,
     {
         Box::new(move |lua, args| function(lua, A::from_lua_multi(args, lua)?)?.to_lua_multi(lua))
     }
 
-    fn box_function_mut<A, R, F>(function: F) -> Callback<'lua, 'static>
+    fn box_function_mut<A, R, F>(function: F) -> Callback<'static>
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        F: 'static + Send + FnMut(&'lua Lua, A) -> Result<R>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + FnMut(&Lua, A) -> Result<R>,
     {
         let function = RefCell::new(function);
         Box::new(move |lua, args| {

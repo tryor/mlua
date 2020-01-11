@@ -121,7 +121,7 @@ impl MetaMethod {
 /// Method registry for [`UserData`] implementors.
 ///
 /// [`UserData`]: trait.UserData.html
-pub trait UserDataMethods<'lua, T: UserData> {
+pub trait UserDataMethods<T: UserData> {
     /// Add a method which accepts a `&T` as the first parameter.
     ///
     /// Regular methods are implemented by overriding the `__index` metamethod and returning the
@@ -132,9 +132,9 @@ pub trait UserDataMethods<'lua, T: UserData> {
     fn add_method<S, A, R, M>(&mut self, name: &S, method: M)
     where
         S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        M: 'static + Send + Fn(&'lua Lua, &T, A) -> Result<R>;
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Send + Fn(&Lua, &T, A) -> Result<R>;
 
     /// Add a regular method which accepts a `&mut T` as the first parameter.
     ///
@@ -144,9 +144,9 @@ pub trait UserDataMethods<'lua, T: UserData> {
     fn add_method_mut<S, A, R, M>(&mut self, name: &S, method: M)
     where
         S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        M: 'static + Send + FnMut(&'lua Lua, &mut T, A) -> Result<R>;
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Send + FnMut(&Lua, &mut T, A) -> Result<R>;
 
     /// Add a regular method as a function which accepts generic arguments, the first argument will
     /// be a `UserData` of type T if the method is called with Lua method syntax:
@@ -160,9 +160,9 @@ pub trait UserDataMethods<'lua, T: UserData> {
     fn add_function<S, A, R, F>(&mut self, name: &S, function: F)
     where
         S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        F: 'static + Send + Fn(&'lua Lua, A) -> Result<R>;
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + Fn(&Lua, A) -> Result<R>;
 
     /// Add a regular method as a mutable function which accepts generic arguments.
     ///
@@ -172,9 +172,9 @@ pub trait UserDataMethods<'lua, T: UserData> {
     fn add_function_mut<S, A, R, F>(&mut self, name: &S, function: F)
     where
         S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        F: 'static + Send + FnMut(&'lua Lua, A) -> Result<R>;
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + FnMut(&Lua, A) -> Result<R>;
 
     /// Add a metamethod which accepts a `&T` as the first parameter.
     ///
@@ -186,9 +186,9 @@ pub trait UserDataMethods<'lua, T: UserData> {
     /// [`add_meta_function`]: #method.add_meta_function
     fn add_meta_method<A, R, M>(&mut self, meta: MetaMethod, method: M)
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        M: 'static + Send + Fn(&'lua Lua, &T, A) -> Result<R>;
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Send + Fn(&Lua, &T, A) -> Result<R>;
 
     /// Add a metamethod as a function which accepts a `&mut T` as the first parameter.
     ///
@@ -200,9 +200,9 @@ pub trait UserDataMethods<'lua, T: UserData> {
     /// [`add_meta_function`]: #method.add_meta_function
     fn add_meta_method_mut<A, R, M>(&mut self, meta: MetaMethod, method: M)
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        M: 'static + Send + FnMut(&'lua Lua, &mut T, A) -> Result<R>;
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Send + FnMut(&Lua, &mut T, A) -> Result<R>;
 
     /// Add a metamethod which accepts generic arguments.
     ///
@@ -211,9 +211,9 @@ pub trait UserDataMethods<'lua, T: UserData> {
     /// userdata of type `T`.
     fn add_meta_function<A, R, F>(&mut self, meta: MetaMethod, function: F)
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        F: 'static + Send + Fn(&'lua Lua, A) -> Result<R>;
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + Fn(&Lua, A) -> Result<R>;
 
     /// Add a metamethod as a mutable function which accepts generic arguments.
     ///
@@ -222,9 +222,9 @@ pub trait UserDataMethods<'lua, T: UserData> {
     /// [`add_meta_function`]: #method.add_meta_function
     fn add_meta_function_mut<A, R, F>(&mut self, meta: MetaMethod, function: F)
     where
-        A: FromLuaMulti<'lua>,
-        R: ToLuaMulti<'lua>,
-        F: 'static + Send + FnMut(&'lua Lua, A) -> Result<R>;
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + FnMut(&Lua, A) -> Result<R>;
 }
 
 /// Trait for custom userdata types.
@@ -260,7 +260,7 @@ pub trait UserDataMethods<'lua, T: UserData> {
 /// struct MyUserData(i32);
 ///
 /// impl UserData for MyUserData {
-///     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+///     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
 ///         methods.add_method("get", |_, this, _: ()| {
 ///             Ok(this.0)
 ///         });
@@ -293,7 +293,7 @@ pub trait UserDataMethods<'lua, T: UserData> {
 /// [`UserDataMethods`]: trait.UserDataMethods.html
 pub trait UserData: Sized {
     /// Adds custom methods and operators specific to this userdata.
-    fn add_methods<'lua, T: UserDataMethods<'lua, Self>>(_methods: &mut T) {}
+    fn add_methods<T: UserDataMethods<Self>>(_methods: &mut T) {}
 }
 
 /// Handle to an internal Lua userdata for any type that implements [`UserData`].
@@ -313,9 +313,9 @@ pub trait UserData: Sized {
 /// [`is`]: #method.is
 /// [`borrow`]: #method.borrow
 #[derive(Clone, Debug)]
-pub struct AnyUserData<'lua>(pub(crate) LuaRef<'lua>);
+pub struct AnyUserData(pub(crate) LuaRef);
 
-impl<'lua> AnyUserData<'lua> {
+impl AnyUserData {
     /// Checks whether the type of this userdata is `T`.
     pub fn is<T: 'static + UserData>(&self) -> bool {
         match self.inspect(|_: &RefCell<T>| Ok(())) {
@@ -354,8 +354,8 @@ impl<'lua> AnyUserData<'lua> {
     /// The value may be any Lua value whatsoever, and can be retrieved with [`get_user_value`].
     ///
     /// [`get_user_value`]: #method.get_user_value
-    pub fn set_user_value<V: ToLua<'lua>>(&self, v: V) -> Result<()> {
-        let lua = self.0.lua;
+    pub fn set_user_value<V: ToLua>(&self, v: V) -> Result<()> {
+        let lua = &self.0.lua;
         #[cfg(any(feature = "lua52", feature = "lua51", feature = "luajit"))]
         let v = {
             // Lua 5.2/5.1 allows to store only table. Then we will wrap the value.
@@ -378,24 +378,24 @@ impl<'lua> AnyUserData<'lua> {
     /// Returns an associated value set by [`set_user_value`].
     ///
     /// [`set_user_value`]: #method.set_user_value
-    pub fn get_user_value<V: FromLua<'lua>>(&self) -> Result<V> {
-        let lua = self.0.lua;
+    pub fn get_user_value<V: FromLua>(&self) -> Result<V> {
+        let lua = &self.0.lua;
         let res = unsafe {
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 3);
             lua.push_ref(&self.0);
             ffi::lua_getuservalue(lua.state, -1);
-            lua.pop_value()
+            lua.clone().pop_value()
         };
         #[cfg(any(feature = "lua52", feature = "lua51", feature = "luajit"))]
-        return crate::Table::from_lua(res, lua)?.get(1);
+        return crate::Table::from_lua(res, lua.clone())?.get(1);
         #[cfg(feature = "lua53")]
         V::from_lua(res, lua)
     }
 
-    fn get_metatable(&self) -> Result<Table<'lua>> {
+    fn get_metatable(&self) -> Result<Table> {
         unsafe {
-            let lua = self.0.lua;
+            let lua = &self.0.lua;
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 3);
 
@@ -435,7 +435,7 @@ impl<'lua> AnyUserData<'lua> {
         F: FnOnce(&'a RefCell<T>) -> Result<R>,
     {
         unsafe {
-            let lua = self.0.lua;
+            let lua = &self.0.lua;
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 3);
 
@@ -460,13 +460,13 @@ impl<'lua> AnyUserData<'lua> {
     }
 }
 
-impl<'lua> PartialEq for AnyUserData<'lua> {
+impl PartialEq for AnyUserData {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
 }
 
-impl<'lua> AsRef<AnyUserData<'lua>> for AnyUserData<'lua> {
+impl AsRef<AnyUserData> for AnyUserData {
     #[inline]
     fn as_ref(&self) -> &Self {
         self

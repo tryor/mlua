@@ -33,7 +33,7 @@ fn test_methods() -> Result<()> {
     struct MyUserData(i64);
 
     impl UserData for MyUserData {
-        fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
             methods.add_method("get_value", |_, data, ()| Ok(data.0));
             methods.add_method_mut("set_value", |_, data, args| {
                 data.0 = args;
@@ -75,7 +75,7 @@ fn test_metamethods() -> Result<()> {
     struct MyUserData(i64);
 
     impl UserData for MyUserData {
-        fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
             methods.add_method("get", |_, data, ()| Ok(data.0));
             methods.add_meta_function(
                 MetaMethod::Add,
@@ -161,7 +161,7 @@ fn test_gc_userdata() -> Result<()> {
     }
 
     impl UserData for MyUserdata {
-        fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
             methods.add_method("access", |_, this, ()| {
                 assert!(this.id == 123);
                 Ok(())
@@ -235,7 +235,7 @@ fn test_functions() -> Result<()> {
     struct MyUserData(i64);
 
     impl UserData for MyUserData {
-        fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
             methods.add_function("get_value", |_, ud: AnyUserData| {
                 Ok(ud.borrow::<MyUserData>()?.0)
             });
