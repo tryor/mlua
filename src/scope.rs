@@ -76,10 +76,7 @@ impl<'scope> Scope<'scope> {
     /// [`Lua::create_function_mut`]: struct.Lua.html#method.create_function_mut
     /// [`Lua::scope`]: struct.Lua.html#method.scope
     /// [`Scope::create_function`]: #method.create_function
-    pub fn create_function_mut<A, R, F>(
-        &self,
-        func: F,
-    ) -> Result<Function>
+    pub fn create_function_mut<A, R, F>(&self, func: F) -> Result<Function>
     where
         A: FromLuaMulti,
         R: ToLuaMulti,
@@ -299,10 +296,7 @@ impl<'scope> Scope<'scope> {
     // lifetime of the callback itself is 'scope (non-'static), the borrow checker will happily pick
     // a 'callback that outlives 'scope to allow this.  In order for this to be safe, the callback
     // must NOT capture any parameters.
-    unsafe fn create_callback(
-        &self,
-        f: Callback<'scope>,
-    ) -> Result<Function> {
+    unsafe fn create_callback(&self, f: Callback<'scope>) -> Result<Function> {
         let f = mem::transmute::<Callback<'scope>, Callback<'static>>(f);
         let f = self.lua.create_callback(f)?;
 

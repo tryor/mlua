@@ -156,7 +156,7 @@ impl Thread {
 
     pub fn into_stream<A>(self, args: A) -> ThreadStream
     where
-        A: ToLuaMulti
+        A: ToLuaMulti,
     {
         let args = args.to_lua_multi(&self.0.lua);
         ThreadStream {

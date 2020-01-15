@@ -3,7 +3,7 @@ use std::cell::{RefCell, UnsafeCell};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::marker::PhantomData;
-use std::os::raw::{c_char, c_int, c_void};
+use std::os::raw::{c_char, c_int};
 use std::sync::{Arc, Mutex};
 use std::{mem, ptr, str};
 
@@ -20,9 +20,10 @@ use crate::userdata::{AnyUserData, MetaMethod, UserData, UserDataMethods};
 #[cfg(any(feature = "lua51", feature = "luajit"))]
 use crate::util::set_main_state;
 use crate::util::{
-    assert_stack, callback_error, check_stack, get_main_state, get_userdata, get_wrapped_error,
-    init_error_registry, init_userdata_metatable, pop_error, protect_lua, protect_lua_closure,
-    push_string, push_userdata, push_wrapped_error, userdata_destructor, StackGuard,
+    assert_stack, callback_error, check_stack, push_gc_userdata, get_gc_userdata,
+    get_main_state, get_wrapped_error, init_error_registry, init_gc_metatable_for,
+    init_userdata_metatable, pop_error, protect_lua, protect_lua_closure, push_string,
+    push_userdata, push_wrapped_error, StackGuard,
 };
 use crate::value::{FromLua, FromLuaMulti, MultiValue, Nil, ToLua, ToLuaMulti, Value};
 
@@ -127,42 +128,11 @@ impl Lua {
             protect_lua_closure(main_state, 0, 0, |state| {
                 init_error_registry(state);
 
-                // Create the function metatables and place them in the registry
+                // Create the internal metatables and place them in the registry
                 // to prevent them from being garbage collected.
 
-                ffi::lua_pushlightuserdata(
-                    state,
-                    &FUNCTION_CALLBACK_METATABLE_REGISTRY_KEY as *const u8 as *mut c_void,
-                );
-
-                ffi::lua_newtable(state);
-
-                ffi::lua_pushstring(state, cstr!("__gc"));
-                ffi::lua_pushcfunction(state, userdata_destructor::<Callback>);
-                ffi::lua_rawset(state, -3);
-
-                ffi::lua_pushstring(state, cstr!("__metatable"));
-                ffi::lua_pushboolean(state, 0);
-                ffi::lua_rawset(state, -3);
-
-                ffi::lua_rawset(state, ffi::LUA_REGISTRYINDEX);
-
-                ffi::lua_pushlightuserdata(
-                    state,
-                    &FUNCTION_EXTRA_METATABLE_REGISTRY_KEY as *const u8 as *mut c_void,
-                );
-
-                ffi::lua_newtable(state);
-
-                ffi::lua_pushstring(state, cstr!("__gc"));
-                ffi::lua_pushcfunction(state, userdata_destructor::<Arc<RefCell<ExtraData>>>);
-                ffi::lua_rawset(state, -3);
-
-                ffi::lua_pushstring(state, cstr!("__metatable"));
-                ffi::lua_pushboolean(state, 0);
-                ffi::lua_rawset(state, -3);
-
-                ffi::lua_rawset(state, ffi::LUA_REGISTRYINDEX);
+                init_gc_metatable_for::<Callback>(state, None);
+                init_gc_metatable_for::<Arc<RefCell<ExtraData>>>(state, None);
 
                 // Create ref stack thread and place it in the registry to prevent it from being garbage
                 // collected.
@@ -477,10 +447,7 @@ impl Lua {
     /// [`create_function`] for more information about the implementation.
     ///
     /// [`create_function`]: #method.create_function
-    pub fn create_function_mut<A, R, F>(
-        &self,
-        func: F,
-    ) -> Result<Function>
+    pub fn create_function_mut<A, R, F>(&self, func: F) -> Result<Function>
     where
         A: FromLuaMulti,
         R: ToLuaMulti,
@@ -657,10 +624,7 @@ impl Lua {
     }
 
     /// Converts a `MultiValue` instance into a value that implements `FromLuaMulti`.
-    pub fn unpack_multi<T: FromLuaMulti>(
-        &self,
-        value: MultiValue,
-    ) -> Result<T> {
+    pub fn unpack_multi<T: FromLuaMulti>(&self, value: MultiValue) -> Result<T> {
         T::from_lua_multi(value, self)
     }
 
@@ -961,7 +925,10 @@ impl Lua {
         let mut extra = self.extra.borrow_mut();
         ffi::lua_xmove(self.state, extra.ref_thread, 1);
         let index = ref_stack_pop(&mut extra);
-        LuaRef { lua: self.clone(), index }
+        LuaRef {
+            lua: self.clone(),
+            index,
+        }
     }
 
     pub(crate) fn clone_ref(&self, lref: &LuaRef) -> LuaRef {
@@ -969,7 +936,10 @@ impl Lua {
             let mut extra = self.extra.borrow_mut();
             ffi::lua_pushvalue(extra.ref_thread, lref.index);
             let index = ref_stack_pop(&mut extra);
-            LuaRef { lua: self.clone(), index }
+            LuaRef {
+                lua: self.clone(),
+                index,
+            }
         }
     }
 
@@ -1048,25 +1018,18 @@ impl Lua {
     //
     // So we instead use a caller provided lifetime, which without the 'static requirement would be
     // unsafe.
-    pub(crate) fn create_callback<'callback>(
-        &self,
-        func: Callback<'static>,
-    ) -> Result<Function> {
+    pub(crate) fn create_callback<'callback>(&self, func: Callback<'static>) -> Result<Function> {
         unsafe extern "C" fn call_callback(state: *mut ffi::lua_State) -> c_int {
             callback_error(state, |nargs| {
-                if ffi::lua_type(state, ffi::lua_upvalueindex(1)) == ffi::LUA_TNIL {
-                    return Err(Error::CallbackDestructed);
-                }
-                if ffi::lua_type(state, ffi::lua_upvalueindex(2)) == ffi::LUA_TNIL {
+                let func = get_gc_userdata::<Callback>(state, ffi::lua_upvalueindex(1));
+                let extra = get_gc_userdata::<Arc<RefCell<ExtraData>>>(state, ffi::lua_upvalueindex(2));
+                if func.is_null() || extra.is_null() {
                     return Err(Error::CallbackDestructed);
                 }
 
                 if nargs < ffi::LUA_MINSTACK {
                     check_stack(state, ffi::LUA_MINSTACK - nargs)?;
                 }
-
-                let extra =
-                    get_userdata::<Arc<RefCell<ExtraData>>>(state, ffi::lua_upvalueindex(2));
 
                 let lua = Lua {
                     state: state,
@@ -1081,8 +1044,6 @@ impl Lua {
                 for _ in 0..nargs {
                     args.push_front(lua.pop_value());
                 }
-
-                let func = get_userdata::<Callback>(state, ffi::lua_upvalueindex(1));
 
                 let results = (*func)(&lua, args)?;
                 let nresults = results.len() as c_int;
@@ -1100,21 +1061,8 @@ impl Lua {
             let _sg = StackGuard::new(self.state);
             assert_stack(self.state, 6);
 
-            push_userdata::<Callback>(self.state, func)?;
-            ffi::lua_pushlightuserdata(
-                self.state,
-                &FUNCTION_CALLBACK_METATABLE_REGISTRY_KEY as *const u8 as *mut c_void,
-            );
-            ffi::lua_rawget(self.state, ffi::LUA_REGISTRYINDEX);
-            ffi::lua_setmetatable(self.state, -2);
-
-            push_userdata::<Arc<RefCell<ExtraData>>>(self.state, self.extra.clone())?;
-            ffi::lua_pushlightuserdata(
-                self.state,
-                &FUNCTION_EXTRA_METATABLE_REGISTRY_KEY as *const u8 as *mut c_void,
-            );
-            ffi::lua_rawget(self.state, ffi::LUA_REGISTRYINDEX);
-            ffi::lua_setmetatable(self.state, -2);
+            push_gc_userdata(self.state, func)?;
+            push_gc_userdata::<Arc<RefCell<ExtraData>>>(self.state, self.extra.clone())?;
 
             protect_lua_closure(self.state, 2, 1, |state| {
                 ffi::lua_pushcclosure(state, call_callback, 2);
@@ -1343,9 +1291,6 @@ unsafe fn ref_stack_pop(extra: &mut ExtraData) -> c_int {
         extra.ref_stack_max
     }
 }
-
-static FUNCTION_CALLBACK_METATABLE_REGISTRY_KEY: u8 = 0;
-static FUNCTION_EXTRA_METATABLE_REGISTRY_KEY: u8 = 0;
 
 struct StaticUserDataMethods<T: 'static + UserData> {
     methods: Vec<(Vec<u8>, Callback<'static>)>,

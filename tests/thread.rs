@@ -1,8 +1,8 @@
 use std::panic::catch_unwind;
 
 use futures::executor::block_on;
-use futures::stream::TryStreamExt;
 use futures::pin_mut;
+use futures::stream::TryStreamExt;
 
 use mlua::{Error, Function, Lua, Result, Thread, ThreadStatus};
 
