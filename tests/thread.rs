@@ -168,3 +168,38 @@ fn coroutine_panic() {
         Err(p) => assert!(*p.downcast::<&str>().unwrap() == "test_panic"),
     }
 }
+
+#[test]
+fn test_thread_async() -> Result<()> {
+    use std::time::Duration;
+
+    let lua = Lua::new();
+
+    use std::sync::Arc;
+
+    let cnt = Arc::new(());
+    let cnt2 = cnt.clone();
+    let f = lua.create_async_function(move |_lua, ()| {
+        let cnt3 = cnt2.clone();
+        async move {
+            println!("hello from async func");
+            futures_timer::Delay::new(Duration::from_secs(1)).await;
+            println!("sleep done");
+            println!("[async] strong count: {}", Arc::strong_count(&cnt3));
+            Ok(())
+        }
+    })?;
+
+    let thread = lua.create_thread(f)?;
+
+    block_on(async {
+        let mut s = thread.into_stream(());
+        let _ = s.try_next().await?;
+        Ok::<_, Error>(())
+    })?;
+
+    lua.gc_collect()?;
+    println!("cnt strong count: {}", Arc::strong_count(&cnt));
+
+    Ok(())
+}

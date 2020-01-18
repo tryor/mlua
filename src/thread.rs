@@ -1,4 +1,4 @@
-use std::os::raw::c_int;
+use std::os::raw::{c_int, c_void};
 use std::pin::Pin;
 
 use futures::stream::Stream;
@@ -6,12 +6,13 @@ use futures::task::{Context, Poll};
 
 use crate::error::{Error, Result};
 use crate::ffi;
-use crate::lua::Lua;
+use crate::lua::{Lua, WAKER_REGISTRY_KEY, AsyncPollPending};
 use crate::types::LuaRef;
 use crate::util::{
-    assert_stack, check_stack, error_traceback, pop_error, protect_lua_closure, StackGuard,
+    assert_stack, check_stack, error_traceback, pop_error, protect_lua_closure, StackGuard, push_gc_userdata,
+    get_gc_userdata,
 };
-use crate::value::{FromLuaMulti, MultiValue, ToLuaMulti};
+use crate::value::{FromLuaMulti, MultiValue, ToLuaMulti, Value};
 
 /// Status of a Lua thread (or coroutine).
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -176,23 +177,75 @@ impl Stream for ThreadStream {
     type Item = Result<(Lua, MultiValue)>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.thread.status() {
-            ThreadStatus::Resumable => {}
-            _ => return Poll::Ready(None),
+        let lua = self.thread.0.lua.clone();
+
+        let waker = cx.waker().clone();
+        let r = (move || -> Result<Poll<Option<MultiValue>>> {
+            match self.thread.status() {
+                ThreadStatus::Resumable => {}
+                _ => return Ok(Poll::Ready(None)),
+            };
+
+            let lua = self.thread.0.lua.clone();
+            unsafe {
+                let _sg = StackGuard::new(lua.state);
+                assert_stack(lua.state, 6);
+
+                ffi::lua_pushlightuserdata(
+                    lua.state,
+                    &WAKER_REGISTRY_KEY as *const u8 as *mut c_void,
+                );
+                push_gc_userdata(lua.state, waker)?;
+                ffi::lua_rawset(lua.state, ffi::LUA_REGISTRYINDEX);
+            }
+
+            let r: MultiValue = if let Some(args) = self.args0.take() {
+                self.thread.resume(args?)?
+            } else {
+                self.thread.resume(())?
+            };
+
+            Ok(Poll::Ready(Some(r)))
+        })();
+
+        unsafe {
+            let _sg = StackGuard::new(lua.state);
+            assert_stack(lua.state, 2);
+
+            ffi::lua_pushlightuserdata(lua.state, &WAKER_REGISTRY_KEY as *const u8 as *mut c_void);
+            ffi::lua_pushnil(lua.state);
+            ffi::lua_rawset(lua.state, ffi::LUA_REGISTRYINDEX);
         }
 
-        let r: Result<MultiValue> = if let Some(args) = self.args0.take() {
-            match args {
-                Err(e) => return Poll::Ready(Some(Err(e))),
-                Ok(x) => self.thread.resume(x),
+        match r {
+            Err(e) => Poll::Ready(Some(Err(e))),
+            Ok(Poll::Pending) => {
+                cx.waker().wake_by_ref();
+                Poll::Pending
             }
-        } else {
-            self.thread.resume(())
-        };
+            Ok(Poll::Ready(None)) => Poll::Ready(None),
+            Ok(Poll::Ready(Some(x))) if x.len() == 1 => {
+                if let Some(Value::UserData(v)) = x.iter().next() {
+                    unsafe {
+                        let _sg = StackGuard::new(lua.state);
+                        assert_stack(lua.state, 3);
 
-        cx.waker().wake_by_ref();
+                        lua.push_ref(&v.0);
+                        let is_pending = get_gc_userdata::<AsyncPollPending>(lua.state, -1).as_ref().is_some();
+                        ffi::lua_pop(lua.state, 1);
 
-        let lua = self.thread.0.lua.clone();
-        return Poll::Ready(Some(r.map(move |x| (lua, x))));
+                        if is_pending {
+                            return Poll::Pending;
+                        }
+                    }
+                }
+                cx.waker().wake_by_ref();
+                Poll::Ready(Some(Ok((lua, x))))
+            }
+            Ok(Poll::Ready(Some(x))) => {
+                cx.waker().wake_by_ref();
+                Poll::Ready(Some(Ok((lua, x))))
+            }
+        }
     }
 }

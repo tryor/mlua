@@ -3,9 +3,12 @@ use std::cell::{RefCell, UnsafeCell};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::marker::PhantomData;
-use std::os::raw::{c_char, c_int};
-use std::sync::{Arc, Mutex};
+use std::os::raw::{c_char, c_int, c_void};
+use std::sync::{Arc, Mutex, mpsc};
 use std::{mem, ptr, str};
+
+use futures::future::{self, BoxFuture, Future, FutureExt, TryFutureExt};
+use futures::task::{Context, Poll, Waker};
 
 use crate::error::{Error, Result};
 use crate::ffi;
@@ -15,7 +18,7 @@ use crate::stdlib::StdLib;
 use crate::string::String;
 use crate::table::Table;
 use crate::thread::Thread;
-use crate::types::{Callback, Integer, LightUserData, LuaRef, Number, RegistryKey};
+use crate::types::{AsyncCallback, Callback, Integer, LightUserData, LuaRef, Number, RegistryKey};
 use crate::userdata::{AnyUserData, MetaMethod, UserData, UserDataMethods};
 #[cfg(any(feature = "lua51", feature = "luajit"))]
 use crate::util::set_main_state;
@@ -48,6 +51,9 @@ struct ExtraData {
     ref_stack_max: c_int,
     ref_free: Vec<c_int>,
 }
+
+pub(crate) struct AsyncPollPending;
+pub(crate) static WAKER_REGISTRY_KEY: u8 = 0;
 
 unsafe impl Send for Lua {}
 
@@ -132,7 +138,12 @@ impl Lua {
                 // to prevent them from being garbage collected.
 
                 init_gc_metatable_for::<Callback>(state, None);
+                init_gc_metatable_for::<AsyncCallback>(state, None);
+                init_gc_metatable_for::<BoxFuture<Result<MultiValue>>>(state, None);
+                init_gc_metatable_for::<AsyncPollPending>(state, None);
+                init_gc_metatable_for::<Waker>(state, None);
                 init_gc_metatable_for::<Arc<RefCell<ExtraData>>>(state, None);
+                init_gc_metatable_for::<mpsc::Sender<i32>>(state, None);
 
                 // Create ref stack thread and place it in the registry to prevent it from being garbage
                 // collected.
@@ -459,6 +470,24 @@ impl Lua {
                 .try_borrow_mut()
                 .map_err(|_| Error::RecursiveMutCallback)?)(lua, args)
         })
+    }
+
+    pub fn create_async_function<A, R, F, FR>(&self, func: F) -> Result<Function>
+    where
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Send + Fn(Lua, A) -> FR,
+        FR: 'static + Send + Future<Output = Result<R>>,
+    {
+        self.create_async_callback(Box::new(move |lua, args| {
+            let args = match A::from_lua_multi(args, &lua) {
+                Ok(x) => x,
+                Err(e) => return future::err(e).boxed(),
+            };
+            func(lua.clone(), args)
+                .and_then(move |x| future::ready(x.to_lua_multi(&lua)))
+                .boxed()
+        }))
     }
 
     /// Wraps a Lua function into a new thread (or coroutine).
@@ -1063,6 +1092,126 @@ impl Lua {
 
             push_gc_userdata(self.state, func)?;
             push_gc_userdata::<Arc<RefCell<ExtraData>>>(self.state, self.extra.clone())?;
+
+            protect_lua_closure(self.state, 2, 1, |state| {
+                ffi::lua_pushcclosure(state, call_callback, 2);
+            })?;
+
+            Ok(Function(self.pop_ref()))
+        }
+    }
+
+    pub(crate) fn create_async_callback<'callback>(
+        &self,
+        func: AsyncCallback<'static>,
+    ) -> Result<Function> {
+        unsafe extern "C" fn call_callback(state: *mut ffi::lua_State) -> c_int {
+            callback_error(state, |nargs| {
+                let func = get_gc_userdata::<AsyncCallback>(state, ffi::lua_upvalueindex(1));
+                let extra = get_gc_userdata::<Arc<RefCell<ExtraData>>>(state, ffi::lua_upvalueindex(2));
+                if func.is_null() || extra.is_null() {
+                    return Err(Error::CallbackDestructed);
+                }
+
+                if nargs < ffi::LUA_MINSTACK {
+                    check_stack(state, ffi::LUA_MINSTACK - nargs)?;
+                }
+
+                let lua = Lua {
+                    state: state,
+                    main_state: get_main_state(state),
+                    extra: (*extra).clone(),
+                    ephemeral: true,
+                    _no_ref_unwind_safe: PhantomData,
+                };
+
+                let mut args = MultiValue::new();
+                args.reserve(nargs as usize);
+                for _ in 0..nargs {
+                    args.push_front(lua.pop_value());
+                }
+
+                let fut = (*func)(lua, args);
+                push_gc_userdata(state, fut)?;
+
+                Ok(1)
+            });
+
+            poll_future(state)
+        }
+
+        unsafe extern "C" fn poll_future(state: *mut ffi::lua_State) -> c_int {
+            let mut do_yield = false;
+            let r = callback_error(state, |_nargs| {
+                let fut = get_gc_userdata::<BoxFuture<Result<MultiValue>>>(state, -1);
+                let extra = get_gc_userdata::<Arc<RefCell<ExtraData>>>(state, ffi::lua_upvalueindex(2));
+                if fut.is_null() || extra.is_null() {
+                    return Err(Error::CallbackDestructed);
+                }
+
+                let lua = Lua {
+                    state: state,
+                    main_state: get_main_state(state),
+                    extra: (*extra).clone(),
+                    ephemeral: true,
+                    _no_ref_unwind_safe: PhantomData,
+                };
+
+                let mut waker = futures::task::noop_waker();
+
+                // Try to get an outer poll waker
+                ffi::lua_pushlightuserdata(
+                    lua.state,
+                    &WAKER_REGISTRY_KEY as *const u8 as *mut c_void,
+                );
+                ffi::lua_rawget(lua.state, ffi::LUA_REGISTRYINDEX);
+                if let Some(w) = get_gc_userdata::<Waker>(lua.state, -1).as_ref() {
+                    waker = (*w).clone();
+                }
+                ffi::lua_pop(lua.state, 1);
+
+                let mut ctx = Context::from_waker(&waker);
+
+                match (*fut).as_mut().poll(&mut ctx) {
+                    Poll::Pending => {
+                        push_gc_userdata(state, AsyncPollPending)?;
+                        do_yield = true;
+                        Ok(1)
+                    }
+                    Poll::Ready(results) => {
+                        let results = results?;
+                        let nresults = results.len() as c_int;
+
+                        check_stack(state, nresults)?;
+                        for r in results {
+                            lua.push_value(r)?;
+                        }
+
+                        Ok(nresults)
+                    }
+                }
+            });
+            if do_yield {
+                ffi::lua_yieldk(state, 1, 0, Some(continue_poll));
+                unreachable!();
+            }
+            r
+        }
+
+        unsafe extern "C" fn continue_poll(
+            state: *mut ffi::lua_State,
+            _status: c_int,
+            _ctx: ffi::lua_KContext,
+        ) -> c_int {
+            poll_future(state)
+        }
+
+        unsafe {
+            let _sg = StackGuard::new(self.state);
+            assert_stack(self.state, 6);
+
+            push_gc_userdata(self.state, func)?;
+            push_gc_userdata(self.state, self.extra.clone())?;
 
             protect_lua_closure(self.state, 2, 1, |state| {
                 ffi::lua_pushcclosure(state, call_callback, 2);

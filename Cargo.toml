@@ -48,6 +48,7 @@ luajit-src = { version = "210.0.0", optional = true }
 rustyline = "5.0"
 criterion = "0.2.0"
 trybuild = "1.0"
+futures-timer = "2.0"
 
 [[bench]]
 name = "benchmark"

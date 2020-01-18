@@ -2,6 +2,8 @@ use std::os::raw::{c_int, c_void};
 use std::sync::{Arc, Mutex};
 use std::{fmt, mem, ptr};
 
+use futures::future::BoxFuture;
+
 use crate::error::Result;
 use crate::ffi;
 use crate::lua::Lua;
@@ -17,7 +19,12 @@ pub type Number = ffi::lua_Number;
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct LightUserData(pub *mut c_void);
 
+unsafe impl Send for LightUserData {}
+
 pub(crate) type Callback<'a> = Box<dyn Fn(&Lua, MultiValue) -> Result<MultiValue> + 'a>;
+
+pub(crate) type AsyncCallback<'a> =
+    Box<dyn Fn(Lua, MultiValue) -> BoxFuture<'a, Result<MultiValue>> + 'a>;
 
 /// An auto generated key into the Lua registry.
 ///
