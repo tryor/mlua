@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::os::raw::{c_char, c_int, c_void};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::{mem, ptr, str};
 
 use futures::future::{self, BoxFuture, Future, FutureExt, TryFutureExt};
@@ -23,10 +23,10 @@ use crate::userdata::{AnyUserData, MetaMethod, UserData, UserDataMethods};
 #[cfg(any(feature = "lua51", feature = "luajit"))]
 use crate::util::set_main_state;
 use crate::util::{
-    assert_stack, callback_error, check_stack, push_gc_userdata, get_gc_userdata,
-    get_main_state, get_wrapped_error, init_error_registry, init_gc_metatable_for,
-    init_userdata_metatable, pop_error, protect_lua, protect_lua_closure, push_string,
-    push_userdata, push_wrapped_error, StackGuard,
+    assert_stack, callback_error, check_stack, get_gc_userdata, get_main_state, get_wrapped_error,
+    init_error_registry, init_gc_metatable_for, init_userdata_metatable, pop_error, protect_lua,
+    protect_lua_closure, push_gc_userdata, push_string, push_userdata, push_wrapped_error,
+    StackGuard,
 };
 use crate::value::{FromLua, FromLuaMulti, MultiValue, Nil, ToLua, ToLuaMulti, Value};
 
@@ -190,7 +190,9 @@ impl Lua {
         R: ToLua,
         F: 'static + Send + Fn(Lua) -> Result<R>,
     {
-        let cb = self.create_callback(Box::new(move |lua, _| func(lua.clone())?.to_lua_multi(&lua)))?;
+        let cb = self.create_callback(Box::new(move |lua, _| {
+            func(lua.clone())?.to_lua_multi(&lua)
+        }))?;
         unsafe { self.push_value(cb.call(())?).map(|_| 1) }
     }
 
@@ -447,7 +449,7 @@ impl Lua {
         R: ToLuaMulti,
         F: 'static + Send + Fn(&Lua, A) -> Result<R>,
     {
-        self.create_callback(Box::new(move |lua, args| {
+        self.create_callback(Box::new(move |ref lua, args| {
             func(lua, A::from_lua_multi(args, lua)?)?.to_lua_multi(lua)
         }))
     }
@@ -1051,7 +1053,8 @@ impl Lua {
         unsafe extern "C" fn call_callback(state: *mut ffi::lua_State) -> c_int {
             callback_error(state, |nargs| {
                 let func = get_gc_userdata::<Callback>(state, ffi::lua_upvalueindex(1));
-                let extra = get_gc_userdata::<Arc<RefCell<ExtraData>>>(state, ffi::lua_upvalueindex(2));
+                let extra =
+                    get_gc_userdata::<Arc<RefCell<ExtraData>>>(state, ffi::lua_upvalueindex(2));
                 if func.is_null() || extra.is_null() {
                     return Err(Error::CallbackDestructed);
                 }
@@ -1074,7 +1077,7 @@ impl Lua {
                     args.push_front(lua.pop_value());
                 }
 
-                let results = (*func)(&lua, args)?;
+                let results = (*func)(lua.clone(), args)?;
                 let nresults = results.len() as c_int;
 
                 check_stack(state, nresults)?;
@@ -1108,7 +1111,8 @@ impl Lua {
         unsafe extern "C" fn call_callback(state: *mut ffi::lua_State) -> c_int {
             callback_error(state, |nargs| {
                 let func = get_gc_userdata::<AsyncCallback>(state, ffi::lua_upvalueindex(1));
-                let extra = get_gc_userdata::<Arc<RefCell<ExtraData>>>(state, ffi::lua_upvalueindex(2));
+                let extra =
+                    get_gc_userdata::<Arc<RefCell<ExtraData>>>(state, ffi::lua_upvalueindex(2));
                 if func.is_null() || extra.is_null() {
                     return Err(Error::CallbackDestructed);
                 }
@@ -1144,7 +1148,8 @@ impl Lua {
             let mut do_yield = false;
             let r = callback_error(state, |_nargs| {
                 let fut = get_gc_userdata::<BoxFuture<Result<MultiValue>>>(state, -1);
-                let extra = get_gc_userdata::<Arc<RefCell<ExtraData>>>(state, ffi::lua_upvalueindex(2));
+                let extra =
+                    get_gc_userdata::<Arc<RefCell<ExtraData>>>(state, ffi::lua_upvalueindex(2));
                 if fut.is_null() || extra.is_null() {
                     return Err(Error::CallbackDestructed);
                 }
@@ -1547,7 +1552,7 @@ impl<T: 'static + UserData> StaticUserDataMethods<T> {
         R: ToLuaMulti,
         M: 'static + Send + Fn(&Lua, &T, A) -> Result<R>,
     {
-        Box::new(move |lua, mut args| {
+        Box::new(move |ref lua, mut args| {
             if let Some(front) = args.pop_front() {
                 let userdata = AnyUserData::from_lua(front, lua)?;
                 let userdata = userdata.borrow::<T>()?;
@@ -1569,7 +1574,7 @@ impl<T: 'static + UserData> StaticUserDataMethods<T> {
         M: 'static + Send + FnMut(&Lua, &mut T, A) -> Result<R>,
     {
         let method = RefCell::new(method);
-        Box::new(move |lua, mut args| {
+        Box::new(move |ref lua, mut args| {
             if let Some(front) = args.pop_front() {
                 let userdata = AnyUserData::from_lua(front, lua)?;
                 let mut userdata = userdata.borrow_mut::<T>()?;
@@ -1593,7 +1598,9 @@ impl<T: 'static + UserData> StaticUserDataMethods<T> {
         R: ToLuaMulti,
         F: 'static + Send + Fn(&Lua, A) -> Result<R>,
     {
-        Box::new(move |lua, args| function(lua, A::from_lua_multi(args, lua)?)?.to_lua_multi(lua))
+        Box::new(move |ref lua, args| {
+            function(lua, A::from_lua_multi(args, lua)?)?.to_lua_multi(lua)
+        })
     }
 
     fn box_function_mut<A, R, F>(function: F) -> Callback<'static>
@@ -1603,7 +1610,7 @@ impl<T: 'static + UserData> StaticUserDataMethods<T> {
         F: 'static + Send + FnMut(&Lua, A) -> Result<R>,
     {
         let function = RefCell::new(function);
-        Box::new(move |lua, args| {
+        Box::new(move |ref lua, args| {
             let function = &mut *function
                 .try_borrow_mut()
                 .map_err(|_| Error::RecursiveMutCallback)?;

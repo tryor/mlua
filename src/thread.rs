@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::marker::PhantomData;
 use std::os::raw::{c_int, c_void};
 use std::pin::Pin;
 
@@ -6,11 +8,11 @@ use futures::task::{Context, Poll};
 
 use crate::error::{Error, Result};
 use crate::ffi;
-use crate::lua::{Lua, WAKER_REGISTRY_KEY, AsyncPollPending};
+use crate::lua::{AsyncPollPending, WAKER_REGISTRY_KEY};
 use crate::types::LuaRef;
 use crate::util::{
-    assert_stack, check_stack, error_traceback, pop_error, protect_lua_closure, StackGuard, push_gc_userdata,
-    get_gc_userdata,
+    assert_stack, check_stack, error_traceback, get_gc_userdata, pop_error, protect_lua_closure,
+    push_gc_userdata, StackGuard,
 };
 use crate::value::{FromLuaMulti, MultiValue, ToLuaMulti, Value};
 
@@ -34,9 +36,10 @@ pub enum ThreadStatus {
 pub struct Thread(pub(crate) LuaRef);
 
 #[derive(Debug)]
-pub struct ThreadStream {
+pub struct ThreadStream<R> {
     thread: Thread,
-    args0: Option<Result<MultiValue>>,
+    args0: RefCell<Option<Result<MultiValue>>>,
+    ret: PhantomData<R>,
 }
 
 impl Thread {
@@ -155,14 +158,54 @@ impl Thread {
         }
     }
 
-    pub fn into_stream<A>(self, args: A) -> ThreadStream
+    /// Converts thread to an async stream.
+    ///
+    /// Passes `args` as arguments to the thread and return `ThreadStream` object.
+    /// The object call `resume()` while polling and also allows to run rust futures
+    /// to completion using an executor.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use mlua::{Error, Lua, Result, Thread};
+    /// use futures::executor::block_on;
+    /// use futures::stream::TryStreamExt;
+    /// # fn main() -> Result<()> {
+    /// # let lua = Lua::new();
+    /// let thread: Thread = lua.load(r#"
+    ///     coroutine.create(function(sum)
+    ///         for i = 1,10 do
+    ///             sum = sum + i
+    ///             coroutine.yield(sum)
+    ///         end
+    ///         return sum
+    ///     end)
+    /// "#).eval()?;
+    ///
+    /// let result = block_on(async {
+    ///     let mut s = thread.into_stream::<_, i64>(1);
+    ///     let mut sum = 0;
+    ///     while let Some(n) = s.try_next().await? {
+    ///         sum += n;
+    ///     }
+    ///     Ok::<_, Error>(sum)
+    /// })?;
+    ///
+    /// assert_eq!(result, 286);
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn into_stream<A, R>(self, args: A) -> ThreadStream<R>
     where
         A: ToLuaMulti,
+        R: FromLuaMulti,
     {
         let args = args.to_lua_multi(&self.0.lua);
         ThreadStream {
             thread: self,
-            args0: Some(args),
+            args0: RefCell::new(Some(args)),
+            ret: PhantomData,
         }
     }
 }
@@ -173,10 +216,13 @@ impl PartialEq for Thread {
     }
 }
 
-impl Stream for ThreadStream {
-    type Item = Result<(Lua, MultiValue)>;
+impl<R> Stream for ThreadStream<R>
+where
+    R: FromLuaMulti,
+{
+    type Item = Result<R>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let lua = self.thread.0.lua.clone();
 
         let waker = cx.waker().clone();
@@ -199,7 +245,7 @@ impl Stream for ThreadStream {
                 ffi::lua_rawset(lua.state, ffi::LUA_REGISTRYINDEX);
             }
 
-            let r: MultiValue = if let Some(args) = self.args0.take() {
+            let r: MultiValue = if let Some(args) = self.args0.borrow_mut().take() {
                 self.thread.resume(args?)?
             } else {
                 self.thread.resume(())?
@@ -231,7 +277,9 @@ impl Stream for ThreadStream {
                         assert_stack(lua.state, 3);
 
                         lua.push_ref(&v.0);
-                        let is_pending = get_gc_userdata::<AsyncPollPending>(lua.state, -1).as_ref().is_some();
+                        let is_pending = get_gc_userdata::<AsyncPollPending>(lua.state, -1)
+                            .as_ref()
+                            .is_some();
                         ffi::lua_pop(lua.state, 1);
 
                         if is_pending {
@@ -240,11 +288,11 @@ impl Stream for ThreadStream {
                     }
                 }
                 cx.waker().wake_by_ref();
-                Poll::Ready(Some(Ok((lua, x))))
+                Poll::Ready(Some(R::from_lua_multi(x, &lua)))
             }
             Ok(Poll::Ready(Some(x))) => {
                 cx.waker().wake_by_ref();
-                Poll::Ready(Some(Ok((lua, x))))
+                Poll::Ready(Some(R::from_lua_multi(x, &lua)))
             }
         }
     }

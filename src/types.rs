@@ -21,7 +21,7 @@ pub struct LightUserData(pub *mut c_void);
 
 unsafe impl Send for LightUserData {}
 
-pub(crate) type Callback<'a> = Box<dyn Fn(&Lua, MultiValue) -> Result<MultiValue> + 'a>;
+pub(crate) type Callback<'a> = Box<dyn Fn(Lua, MultiValue) -> Result<MultiValue> + 'a>;
 
 pub(crate) type AsyncCallback<'a> =
     Box<dyn Fn(Lua, MultiValue) -> BoxFuture<'a, Result<MultiValue>> + 'a>;

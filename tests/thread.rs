@@ -1,4 +1,6 @@
 use std::panic::catch_unwind;
+use std::sync::Arc;
+use std::time::Duration;
 
 use futures::executor::block_on;
 use futures::pin_mut;
@@ -118,11 +120,10 @@ fn test_thread_stream() -> Result<()> {
     )?;
 
     let result = block_on(async {
-        let s = thread.into_stream(0);
+        let s = thread.into_stream::<_, i64>(0);
         pin_mut!(s);
         let mut sum = 0;
-        while let Some((lua, item)) = s.try_next().await? {
-            let n: i64 = lua.unpack_multi(item)?;
+        while let Some(n) = s.try_next().await? {
             sum += n;
         }
         Ok::<_, Error>(sum)
@@ -171,35 +172,29 @@ fn coroutine_panic() {
 
 #[test]
 fn test_thread_async() -> Result<()> {
-    use std::time::Duration;
-
     let lua = Lua::new();
 
-    use std::sync::Arc;
-
-    let cnt = Arc::new(());
+    let cnt = Arc::new(1);
     let cnt2 = cnt.clone();
     let f = lua.create_async_function(move |_lua, ()| {
         let cnt3 = cnt2.clone();
         async move {
-            println!("hello from async func");
-            futures_timer::Delay::new(Duration::from_secs(1)).await;
-            println!("sleep done");
-            println!("[async] strong count: {}", Arc::strong_count(&cnt3));
-            Ok(())
+            futures_timer::Delay::new(Duration::from_secs(*cnt3.as_ref())).await;
+            Ok("hello")
         }
     })?;
 
-    let thread = lua.create_thread(f)?;
-
-    block_on(async {
-        let mut s = thread.into_stream(());
-        let _ = s.try_next().await?;
-        Ok::<_, Error>(())
+    let mut thread_s = lua.create_thread(f)?.into_stream(());
+    let val = block_on(async move {
+        if let Some(s) = thread_s.try_next().await? {
+            return Ok::<_, Error>(s);
+        }
+        Ok::<_, Error>(String::new())
     })?;
 
     lua.gc_collect()?;
-    println!("cnt strong count: {}", Arc::strong_count(&cnt));
+    assert_eq!(Arc::strong_count(&cnt), 1);
+    assert_eq!(val, "hello");
 
     Ok(())
 }
