@@ -3,12 +3,15 @@ use std::cell::{RefCell, UnsafeCell};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::marker::PhantomData;
-use std::os::raw::{c_char, c_int, c_void};
-use std::sync::{mpsc, Arc, Mutex};
+use std::os::raw::{c_char, c_int};
+use std::sync::{Arc, Mutex};
 use std::{mem, ptr, str};
 
-use futures::future::{self, BoxFuture, Future, FutureExt, TryFutureExt};
-use futures::task::{Context, Poll, Waker};
+#[allow(unused_imports)]
+use futures::{
+    future::{self, BoxFuture, Future, FutureExt, TryFutureExt},
+    task::{Context, Poll, Waker},
+};
 
 use crate::error::{Error, Result};
 use crate::ffi;
@@ -143,7 +146,6 @@ impl Lua {
                 init_gc_metatable_for::<AsyncPollPending>(state, None);
                 init_gc_metatable_for::<Waker>(state, None);
                 init_gc_metatable_for::<Arc<RefCell<ExtraData>>>(state, None);
-                init_gc_metatable_for::<mpsc::Sender<i32>>(state, None);
 
                 // Create ref stack thread and place it in the registry to prevent it from being garbage
                 // collected.
@@ -474,6 +476,7 @@ impl Lua {
         })
     }
 
+    #[cfg(any(feature = "lua53", feature = "lua52"))]
     pub fn create_async_function<A, R, F, FR>(&self, func: F) -> Result<Function>
     where
         A: FromLuaMulti,
@@ -1104,6 +1107,7 @@ impl Lua {
         }
     }
 
+    #[cfg(any(feature = "lua53", feature = "lua52"))]
     pub(crate) fn create_async_callback<'callback>(
         &self,
         func: AsyncCallback<'static>,
@@ -1167,7 +1171,7 @@ impl Lua {
                 // Try to get an outer poll waker
                 ffi::lua_pushlightuserdata(
                     lua.state,
-                    &WAKER_REGISTRY_KEY as *const u8 as *mut c_void,
+                    &WAKER_REGISTRY_KEY as *const u8 as *mut ::std::os::raw::c_void,
                 );
                 ffi::lua_rawget(lua.state, ffi::LUA_REGISTRYINDEX);
                 if let Some(w) = get_gc_userdata::<Waker>(lua.state, -1).as_ref() {
@@ -1203,11 +1207,17 @@ impl Lua {
             r
         }
 
+        #[cfg(feature = "lua53")]
         unsafe extern "C" fn continue_poll(
             state: *mut ffi::lua_State,
             _status: c_int,
             _ctx: ffi::lua_KContext,
         ) -> c_int {
+            poll_future(state)
+        }
+
+        #[cfg(feature = "lua52")]
+        unsafe extern "C" fn continue_poll(state: *mut ffi::lua_State) -> c_int {
             poll_future(state)
         }
 

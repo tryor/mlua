@@ -388,7 +388,7 @@ impl AnyUserData {
             lua.clone().pop_value()
         };
         #[cfg(any(feature = "lua52", feature = "lua51", feature = "luajit"))]
-        return crate::Table::from_lua(res, lua.clone())?.get(1);
+        return crate::Table::from_lua(res, lua)?.get(1);
         #[cfg(feature = "lua53")]
         V::from_lua(res, lua)
     }

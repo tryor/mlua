@@ -1,10 +1,10 @@
+#![allow(unused_imports)]
+
 use std::panic::catch_unwind;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::executor::block_on;
-use futures::pin_mut;
-use futures::stream::TryStreamExt;
+use futures::{executor::block_on, pin_mut, stream::TryStreamExt};
 
 use mlua::{Error, Function, Lua, Result, Thread, ThreadStatus};
 
@@ -170,6 +170,7 @@ fn coroutine_panic() {
     }
 }
 
+#[cfg(any(feature = "lua53", feature = "lua52"))]
 #[test]
 fn test_thread_async() -> Result<()> {
     let lua = Lua::new();

@@ -1,9 +1,8 @@
-use std::string::String as StdString;
-use std::time::Duration;
+#![allow(unused_imports)]
 
-use futures::executor::block_on;
-use futures::pin_mut;
-use futures::stream::TryStreamExt;
+use std::{string::String as StdString, time::Duration};
+
+use futures::{executor::block_on, pin_mut, stream::TryStreamExt};
 
 use mlua::{Error, Function, Lua, Result, String, Thread};
 
@@ -83,6 +82,7 @@ fn test_rust_function() -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(feature = "lua53", feature = "lua52"))]
 #[test]
 fn test_async_function() -> Result<()> {
     let lua = Lua::new();
