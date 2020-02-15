@@ -87,11 +87,9 @@ fn test_rust_function() -> Result<()> {
 fn test_async_function() -> Result<()> {
     let lua = Lua::new();
 
-    let f = lua.create_async_function(move |_lua, n: u64| {
-        async move {
-            futures_timer::Delay::new(Duration::from_secs(n)).await;
-            Ok("hello")
-        }
+    let f = lua.create_async_function(move |_lua, n: u64| async move {
+        futures_timer::Delay::new(Duration::from_secs(n)).await;
+        Ok("hello")
     })?;
     lua.globals().set("rust_async_sleep", f)?;
 
