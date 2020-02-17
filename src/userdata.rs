@@ -385,7 +385,7 @@ impl AnyUserData {
             assert_stack(lua.state, 3);
             lua.push_ref(&self.0);
             ffi::lua_getuservalue(lua.state, -1);
-            lua.clone().pop_value()
+            lua.pop_value()
         };
         #[cfg(any(feature = "lua52", feature = "lua51", feature = "luajit"))]
         return crate::Table::from_lua(res, lua)?.get(1);
