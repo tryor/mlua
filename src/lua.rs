@@ -6,11 +6,16 @@ use std::marker::PhantomData;
 use std::os::raw::{c_char, c_int};
 use std::sync::{Arc, Mutex};
 use std::{mem, ptr, str};
+use std::task::Waker;
 
-#[allow(unused_imports)]
-use futures::{
-    future::{self, BoxFuture, Future, FutureExt, TryFutureExt},
-    task::{Context, Poll, Waker},
+use futures_core::future::BoxFuture;
+
+#[cfg(any(feature = "lua53", feature = "lua52"))]
+use {
+    futures_task::noop_waker,
+    futures_util::future::{self, FutureExt, TryFutureExt},
+    std::future::Future,
+    std::task::{Context, Poll},
 };
 
 use crate::error::{Error, Result};
@@ -492,7 +497,8 @@ impl Lua {
     ///
     /// ```
     /// use std::time::Duration;
-    /// use futures::{executor::block_on, pin_mut, stream::TryStreamExt};
+    /// use futures_executor::block_on;
+    /// use futures_util::{pin_mut, stream::TryStreamExt};
     /// use futures_timer::Delay;
     /// # use mlua::{Error, Lua, Result, Thread};
     ///
@@ -1209,7 +1215,7 @@ impl Lua {
                     _no_ref_unwind_safe: PhantomData,
                 };
 
-                let mut waker = futures::task::noop_waker();
+                let mut waker = noop_waker();
 
                 // Try to get an outer poll waker
                 ffi::lua_pushlightuserdata(

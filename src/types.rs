@@ -2,7 +2,7 @@ use std::os::raw::{c_int, c_void};
 use std::sync::{Arc, Mutex};
 use std::{fmt, mem, ptr};
 
-use futures::future::BoxFuture;
+use futures_core::future::BoxFuture;
 
 use crate::error::Result;
 use crate::ffi;

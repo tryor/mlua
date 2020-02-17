@@ -2,7 +2,8 @@
 
 use std::{string::String as StdString, time::Duration};
 
-use futures::{executor::block_on, pin_mut, stream::TryStreamExt};
+use futures_executor::block_on;
+use futures_util::{pin_mut, stream::TryStreamExt};
 
 use mlua::{Error, Function, Lua, Result, String, Thread};
 

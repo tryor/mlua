@@ -4,7 +4,8 @@ use std::panic::catch_unwind;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::{executor::block_on, pin_mut, stream::TryStreamExt};
+use futures_executor::block_on;
+use futures_util::{pin_mut, stream::TryStreamExt};
 
 use mlua::{Error, Function, Lua, Result, Thread, ThreadStatus};
 

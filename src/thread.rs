@@ -2,9 +2,9 @@ use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::os::raw::{c_int, c_void};
 use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use futures::stream::Stream;
-use futures::task::{Context, Poll};
+use futures_core::stream::Stream;
 
 use crate::error::{Error, Result};
 use crate::ffi;
@@ -169,8 +169,8 @@ impl Thread {
     ///
     /// ```
     /// # use mlua::{Error, Lua, Result, Thread};
-    /// use futures::executor::block_on;
-    /// use futures::stream::TryStreamExt;
+    /// use futures_executor::block_on;
+    /// use futures_util::stream::TryStreamExt;
     /// # fn main() -> Result<()> {
     /// # let lua = Lua::new();
     /// let thread: Thread = lua.load(r#"
