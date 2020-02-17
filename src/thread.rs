@@ -35,6 +35,7 @@ pub enum ThreadStatus {
 #[derive(Clone, Debug)]
 pub struct Thread(pub(crate) LuaRef);
 
+/// Thread (coroutine) representation as an async stream .
 #[derive(Debug)]
 pub struct ThreadStream<R> {
     thread: Thread,

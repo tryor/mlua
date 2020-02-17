@@ -476,6 +476,49 @@ impl Lua {
         })
     }
 
+    /// Wraps a Rust async function or closure, creating a callable Lua function handle to it.
+    ///
+    /// While executing the function Rust will poll Future and if the result is not ready, call
+    /// `lua_yield()` returning internal representation of a `Poll::Pending` value.
+    ///
+    /// The function must be called inside [`Thread`] coroutine to be able to suspend its execution.
+    /// An executor could be used together with [`ThreadStream`] and mlua will use a provided Waker
+    /// in that case. Otherwise noop waker will be used if try to call the function outside of Rust
+    /// executors.
+    ///
+    /// # Examples
+    ///
+    /// Non blocking sleep:
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use futures::{executor::block_on, pin_mut, stream::TryStreamExt};
+    /// use futures_timer::Delay;
+    /// # use mlua::{Error, Lua, Result, Thread};
+    ///
+    /// async fn sleep(_lua: Lua, n: u64) -> Result<&'static str> {
+    ///     Delay::new(Duration::from_secs(n)).await;
+    ///     Ok("done")
+    /// }
+    ///
+    /// # fn main() -> Result<()> {
+    /// # let lua = Lua::new();
+    /// lua.globals().set("async_sleep", lua.create_async_function(sleep)?)?;
+    /// let thr = lua.load("coroutine.create(function(n) return async_sleep(n) end)").eval::<Thread>()?;
+    /// let res: String = block_on(async {
+    ///     let s = thr.into_stream(1); // Sleep 1 second
+    ///     pin_mut!(s);
+    ///     let res = s.try_next().await?.unwrap();
+    ///     Ok::<_, Error>(res)
+    /// })?;
+    ///
+    /// assert_eq!(res, "done");
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [`Thread`]: struct.Thread.html
+    /// [`ThreadStream`]: struct.ThreadStream.html
     #[cfg(any(feature = "lua53", feature = "lua52"))]
     pub fn create_async_function<A, R, F, FR>(&self, func: F) -> Result<Function>
     where
