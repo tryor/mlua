@@ -1,6 +1,5 @@
 use std::any::Any;
-use std::cell::Cell;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::marker::PhantomData;
 use std::mem;
 use std::os::raw::c_void;
@@ -19,7 +18,7 @@ use crate::util::{
 use crate::value::{FromLuaMulti, MultiValue, ToLuaMulti, Value};
 
 /// Constructed by the [`Lua::scope`] method, allows temporarily creating Lua userdata and
-/// callbacks that are not required to be Send or 'static.
+/// callbacks that are not required to be 'static.
 ///
 /// See [`Lua::scope`] for more details.
 ///
@@ -93,8 +92,8 @@ impl<'scope> Scope<'scope> {
     /// Create a Lua userdata object from a custom userdata type.
     ///
     /// This is a version of [`Lua::create_userdata`] that creates a userdata which expires on
-    /// scope drop, and does not require that the userdata type be Send (but still requires that the
-    /// UserData be 'static).  See [`Lua::scope`] for more details.
+    /// scope drop.
+    /// See [`Lua::scope`] for more details.
     ///
     /// [`Lua::create_userdata`]: struct.Lua.html#method.create_userdata
     /// [`Lua::scope`]: struct.Lua.html#method.scope
@@ -102,8 +101,6 @@ impl<'scope> Scope<'scope> {
     where
         T: 'static + UserData,
     {
-        // Safe even though T may not be Send, because the parent Lua cannot be sent to another
-        // thread while the Scope is alive (or the returned AnyUserData handle even).
         unsafe {
             let u = self.lua.make_userdata(data)?;
             self.destructors.borrow_mut().push((u.0.clone(), |u| {
@@ -121,12 +118,8 @@ impl<'scope> Scope<'scope> {
     /// Create a Lua userdata object from a custom userdata type.
     ///
     /// This is a version of [`Lua::create_userdata`] that creates a userdata which expires on
-    /// scope drop, and does not require that the userdata type be Send or 'static. See
+    /// scope drop, and does not require that the userdata type be 'static. See
     /// [`Lua::scope`] for more details.
-    ///
-    /// Lifting the requirement that the UserData type be 'static comes with some important
-    /// limitations, so if you only need to eliminate the Send requirement, it is probably better to
-    /// use [`Scope::create_static_userdata`] instead.
     ///
     /// The main limitation that comes from using non-'static userdata is that the produced userdata
     /// will no longer have a `TypeId` associated with it, becuase `TypeId` can only work for
@@ -368,7 +361,7 @@ impl<T: UserData> UserDataMethods<T> for NonStaticUserDataMethods<T> {
         S: ?Sized + AsRef<[u8]>,
         A: FromLuaMulti,
         R: ToLuaMulti,
-        M: 'static + Send + Fn(&Lua, &T, A) -> Result<R>,
+        M: 'static + Fn(&Lua, &T, A) -> Result<R>,
     {
         self.methods.push((
             name.as_ref().to_vec(),
@@ -383,7 +376,7 @@ impl<T: UserData> UserDataMethods<T> for NonStaticUserDataMethods<T> {
         S: ?Sized + AsRef<[u8]>,
         A: FromLuaMulti,
         R: ToLuaMulti,
-        M: 'static + Send + FnMut(&Lua, &mut T, A) -> Result<R>,
+        M: 'static + FnMut(&Lua, &mut T, A) -> Result<R>,
     {
         self.methods.push((
             name.as_ref().to_vec(),
@@ -398,7 +391,7 @@ impl<T: UserData> UserDataMethods<T> for NonStaticUserDataMethods<T> {
         S: ?Sized + AsRef<[u8]>,
         A: FromLuaMulti,
         R: ToLuaMulti,
-        F: 'static + Send + Fn(&Lua, A) -> Result<R>,
+        F: 'static + Fn(&Lua, A) -> Result<R>,
     {
         self.methods.push((
             name.as_ref().to_vec(),
@@ -413,7 +406,7 @@ impl<T: UserData> UserDataMethods<T> for NonStaticUserDataMethods<T> {
         S: ?Sized + AsRef<[u8]>,
         A: FromLuaMulti,
         R: ToLuaMulti,
-        F: 'static + Send + FnMut(&Lua, A) -> Result<R>,
+        F: 'static + FnMut(&Lua, A) -> Result<R>,
     {
         self.methods.push((
             name.as_ref().to_vec(),
@@ -427,7 +420,7 @@ impl<T: UserData> UserDataMethods<T> for NonStaticUserDataMethods<T> {
     where
         A: FromLuaMulti,
         R: ToLuaMulti,
-        M: 'static + Send + Fn(&Lua, &T, A) -> Result<R>,
+        M: 'static + Fn(&Lua, &T, A) -> Result<R>,
     {
         self.meta_methods.push((
             meta,
@@ -441,7 +434,7 @@ impl<T: UserData> UserDataMethods<T> for NonStaticUserDataMethods<T> {
     where
         A: FromLuaMulti,
         R: ToLuaMulti,
-        M: 'static + Send + FnMut(&Lua, &mut T, A) -> Result<R>,
+        M: 'static + FnMut(&Lua, &mut T, A) -> Result<R>,
     {
         self.meta_methods.push((
             meta,
@@ -455,7 +448,7 @@ impl<T: UserData> UserDataMethods<T> for NonStaticUserDataMethods<T> {
     where
         A: FromLuaMulti,
         R: ToLuaMulti,
-        F: 'static + Send + Fn(&Lua, A) -> Result<R>,
+        F: 'static + Fn(&Lua, A) -> Result<R>,
     {
         self.meta_methods.push((
             meta,
@@ -469,7 +462,7 @@ impl<T: UserData> UserDataMethods<T> for NonStaticUserDataMethods<T> {
     where
         A: FromLuaMulti,
         R: ToLuaMulti,
-        F: 'static + Send + FnMut(&Lua, A) -> Result<R>,
+        F: 'static + FnMut(&Lua, A) -> Result<R>,
     {
         self.meta_methods.push((
             meta,

@@ -122,7 +122,7 @@ impl FromLua for AnyUserData {
     }
 }
 
-impl<T: 'static + Send + UserData> ToLua for T {
+impl<T: 'static + UserData> ToLua for T {
     fn to_lua(self, lua: &Lua) -> Result<Value> {
         Ok(Value::UserData(lua.create_userdata(self)?))
     }

@@ -1,18 +1,18 @@
 use std::any::{Any, TypeId};
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::rc::Rc;
 use std::{mem, ptr, slice};
 
 use crate::error::{Error, Result};
 use crate::ffi;
 
-lazy_static::lazy_static! {
-    static ref METATABLE_CACHE: Mutex<HashMap<TypeId, c_int>> = Mutex::new(HashMap::new());
+thread_local! {
+    static METATABLE_CACHE: RefCell<HashMap<TypeId, c_int>> = RefCell::new(HashMap::new());
 }
 
 // Checks that Lua has enough free stack space for future stack operations.  On failure, this will
@@ -460,7 +460,7 @@ pub unsafe extern "C" fn error_traceback(state: *mut ffi::lua_State) -> c_int {
             ud,
             WrappedError(Error::CallbackError {
                 traceback,
-                cause: Arc::new(error),
+                cause: Rc::new(error),
             }),
         );
         get_gc_metatable_for::<WrappedError>(state);
@@ -535,13 +535,13 @@ pub unsafe fn init_gc_metatable_for<T: Any>(
     }
 
     let ref_addr = ffi::luaL_ref(state, ffi::LUA_REGISTRYINDEX);
-    METATABLE_CACHE.lock().unwrap().insert(type_id, ref_addr);
+    METATABLE_CACHE.with(|mc| mc.borrow_mut().insert(type_id, ref_addr));
 }
 
 pub unsafe fn get_gc_metatable_for<T: Any>(state: *mut ffi::lua_State) {
-    let mt_cache = &*METATABLE_CACHE.lock().unwrap();
     let type_id = TypeId::of::<T>();
-    let ref_addr = *mlua_expect!(mt_cache.get(&type_id), "gc metatable does not exist");
+    let ref_addr = METATABLE_CACHE
+        .with(|mc| *mlua_expect!(mc.borrow().get(&type_id), "gc metatable does not exist"));
     ffi::lua_rawgeti(state, ffi::LUA_REGISTRYINDEX, ref_addr as ffi::lua_Integer);
 }
 

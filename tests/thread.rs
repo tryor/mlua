@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
 use std::panic::catch_unwind;
-use std::sync::Arc;
+use std::rc::Rc;
 use std::time::Duration;
 
 use futures_executor::block_on;
@@ -176,7 +176,7 @@ fn coroutine_panic() {
 fn test_thread_async() -> Result<()> {
     let lua = Lua::new();
 
-    let cnt = Arc::new(1);
+    let cnt = Rc::new(1);
     let cnt2 = cnt.clone();
     let f = lua.create_async_function(move |_lua, ()| {
         let cnt3 = cnt2.clone();
@@ -195,7 +195,7 @@ fn test_thread_async() -> Result<()> {
     })?;
 
     lua.gc_collect()?;
-    assert_eq!(Arc::strong_count(&cnt), 1);
+    assert_eq!(Rc::strong_count(&cnt), 1);
     assert_eq!(val, "hello");
 
     Ok(())

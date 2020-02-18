@@ -1,8 +1,9 @@
+use std::cell::RefCell;
 use std::os::raw::{c_int, c_void};
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
 use std::{fmt, mem, ptr};
 
-use futures_core::future::BoxFuture;
+use futures_core::future::LocalBoxFuture;
 
 use crate::error::Result;
 use crate::ffi;
@@ -19,20 +20,18 @@ pub type Number = ffi::lua_Number;
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct LightUserData(pub *mut c_void);
 
-unsafe impl Send for LightUserData {}
-
 pub(crate) type Callback<'a> = Box<dyn Fn(Lua, MultiValue) -> Result<MultiValue> + 'a>;
 
 pub(crate) type AsyncCallback<'a> =
-    Box<dyn Fn(Lua, MultiValue) -> BoxFuture<'a, Result<MultiValue>> + 'a>;
+    Box<dyn Fn(Lua, MultiValue) -> LocalBoxFuture<'a, Result<MultiValue>> + 'a>;
 
 /// An auto generated key into the Lua registry.
 ///
 /// This is a handle to a value stored inside the Lua registry.  It is not directly usable like the
 /// `Table` or `Function` handle types, but since it doesn't hold a reference to a parent Lua and is
-/// Send + Sync + 'static, it is much more flexible and can be used in many situations where it is
-/// impossible to directly store a normal handle type.  It is not automatically garbage collected on
-/// Drop, but it can be removed with [`Lua::remove_registry_value`], and instances not manually
+/// 'static, it is much more flexible and can be used in many situations where it is impossible to
+/// directly store a normal handle type.  It is not automatically garbage collected on Drop,
+/// but it can be removed with [`Lua::remove_registry_value`], and instances not manually
 /// removed can be garbage collected with [`Lua::expire_registry_values`].
 ///
 /// Be warned, If you place this into Lua via a `UserData` type or a rust callback, it is *very
@@ -48,7 +47,7 @@ pub(crate) type AsyncCallback<'a> =
 /// [`UserData::get_user_value`]: struct.UserData.html#method.get_user_value
 pub struct RegistryKey {
     pub(crate) registry_id: c_int,
-    pub(crate) unref_list: Arc<Mutex<Option<Vec<c_int>>>>,
+    pub(crate) unref_list: Rc<RefCell<Option<Vec<c_int>>>>,
 }
 
 impl fmt::Debug for RegistryKey {
@@ -59,7 +58,8 @@ impl fmt::Debug for RegistryKey {
 
 impl Drop for RegistryKey {
     fn drop(&mut self) {
-        if let Some(list) = mlua_expect!(self.unref_list.lock(), "unref_list poisoned").as_mut() {
+        let mut unref_list = mlua_expect!(self.unref_list.try_borrow_mut(), "unref list borrowed");
+        if let Some(list) = unref_list.as_mut() {
             list.push(self.registry_id);
         }
     }

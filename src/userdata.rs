@@ -1,4 +1,5 @@
 use std::cell::{Ref, RefCell, RefMut};
+use std::future::Future;
 
 use crate::error::{Error, Result};
 use crate::ffi;
@@ -134,7 +135,7 @@ pub trait UserDataMethods<T: UserData> {
         S: ?Sized + AsRef<[u8]>,
         A: FromLuaMulti,
         R: ToLuaMulti,
-        M: 'static + Send + Fn(&Lua, &T, A) -> Result<R>;
+        M: 'static + Fn(&Lua, &T, A) -> Result<R>;
 
     /// Add a regular method which accepts a `&mut T` as the first parameter.
     ///
@@ -146,7 +147,7 @@ pub trait UserDataMethods<T: UserData> {
         S: ?Sized + AsRef<[u8]>,
         A: FromLuaMulti,
         R: ToLuaMulti,
-        M: 'static + Send + FnMut(&Lua, &mut T, A) -> Result<R>;
+        M: 'static + FnMut(&Lua, &mut T, A) -> Result<R>;
 
     /// Add a regular method as a function which accepts generic arguments, the first argument will
     /// be a `UserData` of type T if the method is called with Lua method syntax:
@@ -162,7 +163,7 @@ pub trait UserDataMethods<T: UserData> {
         S: ?Sized + AsRef<[u8]>,
         A: FromLuaMulti,
         R: ToLuaMulti,
-        F: 'static + Send + Fn(&Lua, A) -> Result<R>;
+        F: 'static + Fn(&Lua, A) -> Result<R>;
 
     /// Add a regular method as a mutable function which accepts generic arguments.
     ///
@@ -174,7 +175,7 @@ pub trait UserDataMethods<T: UserData> {
         S: ?Sized + AsRef<[u8]>,
         A: FromLuaMulti,
         R: ToLuaMulti,
-        F: 'static + Send + FnMut(&Lua, A) -> Result<R>;
+        F: 'static + FnMut(&Lua, A) -> Result<R>;
 
     /// Add a metamethod which accepts a `&T` as the first parameter.
     ///
@@ -188,7 +189,7 @@ pub trait UserDataMethods<T: UserData> {
     where
         A: FromLuaMulti,
         R: ToLuaMulti,
-        M: 'static + Send + Fn(&Lua, &T, A) -> Result<R>;
+        M: 'static + Fn(&Lua, &T, A) -> Result<R>;
 
     /// Add a metamethod as a function which accepts a `&mut T` as the first parameter.
     ///
@@ -202,7 +203,7 @@ pub trait UserDataMethods<T: UserData> {
     where
         A: FromLuaMulti,
         R: ToLuaMulti,
-        M: 'static + Send + FnMut(&Lua, &mut T, A) -> Result<R>;
+        M: 'static + FnMut(&Lua, &mut T, A) -> Result<R>;
 
     /// Add a metamethod which accepts generic arguments.
     ///
@@ -213,7 +214,7 @@ pub trait UserDataMethods<T: UserData> {
     where
         A: FromLuaMulti,
         R: ToLuaMulti,
-        F: 'static + Send + Fn(&Lua, A) -> Result<R>;
+        F: 'static + Fn(&Lua, A) -> Result<R>;
 
     /// Add a metamethod as a mutable function which accepts generic arguments.
     ///
@@ -224,7 +225,28 @@ pub trait UserDataMethods<T: UserData> {
     where
         A: FromLuaMulti,
         R: ToLuaMulti,
-        F: 'static + Send + FnMut(&Lua, A) -> Result<R>;
+        F: 'static + FnMut(&Lua, A) -> Result<R>;
+}
+
+/// Async method registry for [`UserData`] implementors.
+///
+/// [`UserData`]: trait.UserData.html
+pub trait UserDataAsyncMethods<T: UserData + Clone> {
+    fn add_method<S, A, R, M, MR>(&mut self, name: &S, method: M)
+    where
+        S: ?Sized + AsRef<[u8]>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Fn(Lua, T, A) -> MR,
+        MR: 'static + Future<Output = Result<R>>;
+
+    fn add_function<S, A, R, F, FR>(&mut self, name: &S, function: F)
+    where
+        S: ?Sized + AsRef<[u8]>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Fn(Lua, A) -> FR,
+        FR: 'static + Future<Output = Result<R>>;
 }
 
 /// Trait for custom userdata types.
@@ -293,7 +315,14 @@ pub trait UserDataMethods<T: UserData> {
 /// [`UserDataMethods`]: trait.UserDataMethods.html
 pub trait UserData: Sized {
     /// Adds custom methods and operators specific to this userdata.
-    fn add_methods<T: UserDataMethods<Self>>(_methods: &mut T) {}
+    fn add_methods<M: UserDataMethods<Self>>(_methods: &mut M) {}
+
+    #[cfg(any(feature = "lua53", feature = "lua52"))]
+    fn add_async_methods<M: UserDataAsyncMethods<Self>>(_methods: &mut M)
+    where
+        Self: Clone,
+    {
+    }
 }
 
 /// Handle to an internal Lua userdata for any type that implements [`UserData`].
