@@ -2,13 +2,13 @@ use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::os::raw::{c_int, c_void};
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, Waker};
 
-use futures_core::stream::Stream;
+use futures_core::{future::Future, stream::Stream};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, ExternalError, Result};
 use crate::ffi;
-use crate::lua::{AsyncPollPending, WAKER_REGISTRY_KEY};
+use crate::lua::{AsyncPollPending, Lua, WAKER_REGISTRY_KEY};
 use crate::types::LuaRef;
 use crate::util::{
     assert_stack, check_stack, error_traceback, get_gc_userdata, pop_error, protect_lua_closure,
@@ -35,9 +35,9 @@ pub enum ThreadStatus {
 #[derive(Clone, Debug)]
 pub struct Thread(pub(crate) LuaRef);
 
-/// Thread (coroutine) representation as an async stream .
+/// Thread (coroutine) representation as an async Future or Stream.
 #[derive(Debug)]
-pub struct ThreadStream<R> {
+pub struct AsyncThread<R> {
     thread: Thread,
     args0: RefCell<Option<Result<MultiValue>>>,
     ret: PhantomData<R>,
@@ -159,7 +159,7 @@ impl Thread {
         }
     }
 
-    /// Converts thread to an async stream.
+    /// Converts thread to an async Future or Stream.
     ///
     /// Passes `args` as arguments to the thread and return `ThreadStream` object.
     /// The object call `resume()` while polling and also allows to run rust futures
@@ -184,7 +184,7 @@ impl Thread {
     /// "#).eval()?;
     ///
     /// let result = block_on(async {
-    ///     let mut s = thread.into_stream::<_, i64>(1);
+    ///     let mut s = thread.into_async::<_, i64>(1);
     ///     let mut sum = 0;
     ///     while let Some(n) = s.try_next().await? {
     ///         sum += n;
@@ -197,13 +197,13 @@ impl Thread {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn into_stream<A, R>(self, args: A) -> ThreadStream<R>
+    pub fn into_async<A, R>(self, args: A) -> AsyncThread<R>
     where
         A: ToLuaMulti,
         R: FromLuaMulti,
     {
         let args = args.to_lua_multi(&self.0.lua);
-        ThreadStream {
+        AsyncThread {
             thread: self,
             args0: RefCell::new(Some(args)),
             ret: PhantomData,
@@ -217,7 +217,7 @@ impl PartialEq for Thread {
     }
 }
 
-impl<R> Stream for ThreadStream<R>
+impl<R> Stream for AsyncThread<R>
 where
     R: FromLuaMulti,
 {
@@ -226,75 +226,106 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let lua = self.thread.0.lua.clone();
 
-        let waker = cx.waker().clone();
-        let r = (move || -> Result<Poll<Option<MultiValue>>> {
-            match self.thread.status() {
-                ThreadStatus::Resumable => {}
-                _ => return Ok(Poll::Ready(None)),
-            };
+        match self.thread.status() {
+            ThreadStatus::Resumable => {}
+            _ => return Poll::Ready(None),
+        };
 
-            let lua = self.thread.0.lua.clone();
-            unsafe {
-                let _sg = StackGuard::new(lua.state);
-                assert_stack(lua.state, 6);
+        set_waker(&lua, cx.waker().clone())?;
+        let ret: MultiValue = if let Some(args) = self.args0.borrow_mut().take() {
+            self.thread.resume(args?)?
+        } else {
+            self.thread.resume(())?
+        };
+        unset_waker(&lua);
 
-                ffi::lua_pushlightuserdata(
-                    lua.state,
-                    &WAKER_REGISTRY_KEY as *const u8 as *mut c_void,
-                );
-                push_gc_userdata(lua.state, waker)?;
-                ffi::lua_rawset(lua.state, ffi::LUA_REGISTRYINDEX);
-            }
+        if is_poll_pending(&lua, &ret) {
+            return Poll::Pending;
+        }
 
-            let r: MultiValue = if let Some(args) = self.args0.borrow_mut().take() {
-                self.thread.resume(args?)?
-            } else {
-                self.thread.resume(())?
-            };
+        cx.waker().wake_by_ref();
+        Poll::Ready(Some(R::from_lua_multi(ret, &lua)))
+    }
+}
 
-            Ok(Poll::Ready(Some(r)))
-        })();
+impl<R> Future for AsyncThread<R>
+where
+    R: FromLuaMulti,
+{
+    type Output = Result<R>;
 
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let lua = self.thread.0.lua.clone();
+
+        match self.thread.status() {
+            ThreadStatus::Resumable => {}
+            _ => return Poll::Ready(Err("Thread already finished".to_lua_err())),
+        };
+
+        set_waker(&lua, cx.waker().clone())?;
+        let ret: MultiValue = if let Some(args) = self.args0.borrow_mut().take() {
+            self.thread.resume(args?)?
+        } else {
+            self.thread.resume(())?
+        };
+        unset_waker(&lua);
+
+        if is_poll_pending(&lua, &ret) {
+            return Poll::Pending;
+        }
+
+        if let ThreadStatus::Resumable = self.thread.status() {
+            // Ignore value returned via yield()
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
+        }
+
+        Poll::Ready(R::from_lua_multi(ret, &lua))
+    }
+}
+
+fn set_waker(lua: &Lua, waker: Waker) -> Result<()> {
+    unsafe {
+        let _sg = StackGuard::new(lua.state);
+        assert_stack(lua.state, 6);
+
+        ffi::lua_pushlightuserdata(lua.state, &WAKER_REGISTRY_KEY as *const u8 as *mut c_void);
+        push_gc_userdata(lua.state, waker)?;
+        ffi::lua_rawset(lua.state, ffi::LUA_REGISTRYINDEX);
+    }
+    Ok(())
+}
+
+fn unset_waker(lua: &Lua) {
+    unsafe {
+        let _sg = StackGuard::new(lua.state);
+        assert_stack(lua.state, 2);
+
+        ffi::lua_pushlightuserdata(lua.state, &WAKER_REGISTRY_KEY as *const u8 as *mut c_void);
+        ffi::lua_pushnil(lua.state);
+        ffi::lua_rawset(lua.state, ffi::LUA_REGISTRYINDEX);
+    }
+}
+
+fn is_poll_pending(lua: &Lua, val: &MultiValue) -> bool {
+    if val.len() != 1 {
+        return false;
+    }
+
+    if let Some(Value::UserData(ud)) = val.iter().next() {
         unsafe {
             let _sg = StackGuard::new(lua.state);
-            assert_stack(lua.state, 2);
+            assert_stack(lua.state, 3);
 
-            ffi::lua_pushlightuserdata(lua.state, &WAKER_REGISTRY_KEY as *const u8 as *mut c_void);
-            ffi::lua_pushnil(lua.state);
-            ffi::lua_rawset(lua.state, ffi::LUA_REGISTRYINDEX);
-        }
+            lua.push_ref(&ud.0);
+            let is_pending = get_gc_userdata::<AsyncPollPending>(lua.state, -1)
+                .as_ref()
+                .is_some();
+            ffi::lua_pop(lua.state, 1);
 
-        match r {
-            Err(e) => Poll::Ready(Some(Err(e))),
-            Ok(Poll::Pending) => {
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-            Ok(Poll::Ready(None)) => Poll::Ready(None),
-            Ok(Poll::Ready(Some(x))) if x.len() == 1 => {
-                if let Some(Value::UserData(v)) = x.iter().next() {
-                    unsafe {
-                        let _sg = StackGuard::new(lua.state);
-                        assert_stack(lua.state, 3);
-
-                        lua.push_ref(&v.0);
-                        let is_pending = get_gc_userdata::<AsyncPollPending>(lua.state, -1)
-                            .as_ref()
-                            .is_some();
-                        ffi::lua_pop(lua.state, 1);
-
-                        if is_pending {
-                            return Poll::Pending;
-                        }
-                    }
-                }
-                cx.waker().wake_by_ref();
-                Poll::Ready(Some(R::from_lua_multi(x, &lua)))
-            }
-            Ok(Poll::Ready(Some(x))) => {
-                cx.waker().wake_by_ref();
-                Poll::Ready(Some(R::from_lua_multi(x, &lua)))
-            }
+            return is_pending;
         }
     }
+
+    false
 }

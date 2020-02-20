@@ -500,9 +500,8 @@ impl Lua {
     /// ```
     /// use std::time::Duration;
     /// use futures_executor::block_on;
-    /// use futures_util::{pin_mut, stream::TryStreamExt};
     /// use futures_timer::Delay;
-    /// # use mlua::{Error, Lua, Result, Thread};
+    /// # use mlua::{Lua, Result, Thread};
     ///
     /// async fn sleep(_lua: Lua, n: u64) -> Result<&'static str> {
     ///     Delay::new(Duration::from_secs(n)).await;
@@ -514,10 +513,7 @@ impl Lua {
     /// lua.globals().set("async_sleep", lua.create_async_function(sleep)?)?;
     /// let thr = lua.load("coroutine.create(function(n) return async_sleep(n) end)").eval::<Thread>()?;
     /// let res: String = block_on(async {
-    ///     let s = thr.into_stream(1); // Sleep 1 second
-    ///     pin_mut!(s);
-    ///     let res = s.try_next().await?.unwrap();
-    ///     Ok::<_, Error>(res)
+    ///     thr.into_async(1).await // Sleep 1 second
     /// })?;
     ///
     /// assert_eq!(res, "done");
@@ -1104,7 +1100,7 @@ impl Lua {
     // Fn is 'static, otherwise it could capture 'callback arguments improperly.  Without ATCs, we
     // cannot easily deal with the "correct" callback type of:
     //
-    // Box<for Fn(Rc<Lua>, MultiValue) -> Result<MultiValue>)>
+    // Box<for Fn(Lua, MultiValue) -> Result<MultiValue>)>
     //
     // So we instead use a caller provided lifetime, which without the 'static requirement would be
     // unsafe.

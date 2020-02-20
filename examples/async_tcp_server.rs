@@ -2,13 +2,12 @@ use std::net::Shutdown;
 use std::rc::Rc;
 
 use bstr::BString;
-use futures_util::stream::TryStreamExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 use tokio::sync::Mutex;
 use tokio::task;
 
-use mlua::{Error, Function, Lua, Result, Thread, UserData, UserDataAsyncMethods};
+use mlua::{Function, Lua, Result, Thread, UserData, UserDataAsyncMethods};
 
 #[derive(Clone)]
 struct LuaTcpListener(Option<Rc<Mutex<TcpListener>>>);
@@ -70,8 +69,8 @@ async fn main() -> Result<()> {
         "spawn",
         lua.create_function(move |lua: &Lua, func: Function| {
             let thr = lua.create_thread(func)?;
-            let mut s = thr.into_stream::<_, ()>(());
-            task::spawn_local(async move { s.try_next().await.unwrap() });
+            let fut = thr.into_async::<_, ()>(());
+            task::spawn_local(async move { fut.await.unwrap() });
             Ok(())
         })?,
     )?;
@@ -102,12 +101,6 @@ async fn main() -> Result<()> {
         .eval::<Thread>()?;
 
     task::LocalSet::new()
-        .run_until(async {
-            let mut s = thread.into_stream::<_, ()>(());
-            s.try_next().await?.unwrap();
-            Ok::<_, Error>(())
-        })
-        .await?;
-
-    Ok(())
+        .run_until(thread.into_async(()))
+        .await
 }

@@ -3,7 +3,6 @@
 use std::{string::String as StdString, time::Duration};
 
 use futures_executor::block_on;
-use futures_util::{pin_mut, stream::TryStreamExt};
 
 use mlua::{Error, Function, Lua, Result, String, Thread};
 
@@ -100,6 +99,7 @@ fn test_async_function() -> Result<()> {
             coroutine.create(function ()
                 ret = rust_async_sleep(1)
                 assert(ret == "hello")
+                coroutine.yield()
                 return "world"
             end)
         "#,
@@ -107,9 +107,8 @@ fn test_async_function() -> Result<()> {
         .eval::<Thread>()?;
 
     block_on(async {
-        let s = thread.into_stream(());
-        pin_mut!(s);
-        let ret: StdString = s.try_next().await?.unwrap();
+        let fut = thread.into_async(());
+        let ret: StdString = fut.await?;
         assert_eq!(ret, "world");
         Ok::<_, Error>(())
     })?;

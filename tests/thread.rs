@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use futures_executor::block_on;
-use futures_util::{pin_mut, stream::TryStreamExt};
+use futures_util::stream::TryStreamExt;
 
 use mlua::{Error, Function, Lua, Result, Thread, ThreadStatus};
 
@@ -121,8 +121,7 @@ fn test_thread_stream() -> Result<()> {
     )?;
 
     let result = block_on(async {
-        let s = thread.into_stream::<_, i64>(0);
-        pin_mut!(s);
+        let mut s = thread.into_async::<_, i64>(0);
         let mut sum = 0;
         while let Some(n) = s.try_next().await? {
             sum += n;
@@ -186,7 +185,7 @@ fn test_thread_async() -> Result<()> {
         }
     })?;
 
-    let mut thread_s = lua.create_thread(f)?.into_stream(());
+    let mut thread_s = lua.create_thread(f)?.into_async(());
     let val = block_on(async move {
         if let Some(s) = thread_s.try_next().await? {
             return Ok::<_, Error>(s);
