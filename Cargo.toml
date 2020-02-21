@@ -26,11 +26,12 @@ members = [
 
 [features]
 default = ["lua53"]
-lua53 = ["futures-task", "futures-util"]
-lua52 = ["futures-task", "futures-util"]
+lua53 = ["async"]
+lua52 = ["async"]
 lua51 = []
 luajit = []
 vendored = ["lua-src", "luajit-src"]
+async = ["futures-task", "futures-util"]
 
 [dependencies]
 bstr = { version = "0.2", features = ["std"], default_features = false }
@@ -57,3 +58,7 @@ futures-timer = "3.0"
 [[bench]]
 name = "benchmark"
 harness = false
+
+[[example]]
+name = "async_tcp_server"
+required-features = ["async"]

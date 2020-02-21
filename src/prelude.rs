@@ -10,3 +10,6 @@ pub use crate::{
     Thread as LuaThread, ThreadStatus as LuaThreadStatus, ToLua, ToLuaMulti,
     UserData as LuaUserData, UserDataMethods as LuaUserDataMethods, Value as LuaValue,
 };
+
+#[cfg(feature = "async")]
+pub use crate::{AsyncThread as LuaAsyncThread, UserDataAsyncMethods as LuaUserDataAsyncMethods};

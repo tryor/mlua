@@ -232,6 +232,12 @@ pub trait UserDataMethods<T: UserData> {
 ///
 /// [`UserData`]: trait.UserData.html
 pub trait UserDataAsyncMethods<T: UserData + Clone> {
+    /// Add an async method which accepts a `T` as the first parameter and returns Future.
+    /// The passed `T` is cloned from the original value.
+    ///
+    /// Refer to [`add_method`] for more information about the implementation.
+    ///
+    /// [`add_method`]: #method.add_method
     fn add_method<S, A, R, M, MR>(&mut self, name: &S, method: M)
     where
         S: ?Sized + AsRef<[u8]>,
@@ -313,7 +319,7 @@ pub trait UserDataAsyncMethods<T: UserData + Clone> {
 /// [`ToLua`]: trait.ToLua.html
 /// [`FromLua`]: trait.FromLua.html
 /// [`UserDataMethods`]: trait.UserDataMethods.html
-pub trait UserData: Sized {
+pub trait UserData: Sized + Clone {
     /// Adds custom methods and operators specific to this userdata.
     fn add_methods<M: UserDataMethods<Self>>(_methods: &mut M) {}
 

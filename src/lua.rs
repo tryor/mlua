@@ -10,7 +10,7 @@ use std::{mem, ptr, str};
 
 use futures_core::future::LocalBoxFuture;
 
-#[cfg(any(feature = "lua53", feature = "lua52"))]
+#[cfg(feature = "async")]
 use {
     crate::userdata::UserDataAsyncMethods,
     futures_task::noop_waker,
@@ -523,7 +523,7 @@ impl Lua {
     ///
     /// [`Thread`]: struct.Thread.html
     /// [`ThreadStream`]: struct.ThreadStream.html
-    #[cfg(any(feature = "lua53", feature = "lua52"))]
+    #[cfg(feature = "async")]
     pub fn create_async_function<A, R, F, FR>(&self, func: F) -> Result<Function>
     where
         A: FromLuaMulti,
@@ -1045,6 +1045,8 @@ impl Lua {
 
         let mut methods = StaticUserDataMethods::default();
         T::add_methods(&mut methods);
+        #[cfg(feature = "async")]
+        T::add_async_methods(&mut methods);
 
         protect_lua_closure(self.state, 0, 1, |state| {
             ffi::lua_newtable(state);
@@ -1071,7 +1073,7 @@ impl Lua {
                     ffi::lua_rawset(state, -3);
                 })?;
             }
-            #[cfg(any(feature = "lua53", feature = "lua52"))]
+            #[cfg(feature = "async")]
             for (k, m) in methods.async_methods {
                 push_string(self.state, &k)?;
                 self.push_value(Value::Function(self.create_async_callback(m)?))?;
@@ -1159,7 +1161,7 @@ impl Lua {
         }
     }
 
-    #[cfg(any(feature = "lua53", feature = "lua52"))]
+    #[cfg(feature = "async")]
     pub(crate) fn create_async_callback<'callback>(
         &self,
         func: AsyncCallback<'static>,
@@ -1608,7 +1610,7 @@ impl<T: 'static + UserData> UserDataMethods<T> for StaticUserDataMethods<T> {
     }
 }
 
-#[cfg(any(feature = "lua53", feature = "lua52"))]
+#[cfg(feature = "async")]
 impl<T: 'static + UserData + Clone> UserDataAsyncMethods<T> for StaticUserDataMethods<T> {
     fn add_method<S, A, R, M, MR>(&mut self, name: &S, method: M)
     where
@@ -1682,7 +1684,7 @@ impl<T: 'static + UserData> StaticUserDataMethods<T> {
         })
     }
 
-    #[cfg(any(feature = "lua53", feature = "lua52"))]
+    #[cfg(feature = "async")]
     fn box_async_method<A, R, M, MR>(method: M) -> AsyncCallback<'static>
     where
         T: Clone,
@@ -1744,7 +1746,7 @@ impl<T: 'static + UserData> StaticUserDataMethods<T> {
         })
     }
 
-    #[cfg(any(feature = "lua53", feature = "lua52"))]
+    #[cfg(feature = "async")]
     fn box_async_function<A, R, F, FR>(function: F) -> AsyncCallback<'static>
     where
         A: FromLuaMulti,

@@ -159,11 +159,15 @@ impl Thread {
         }
     }
 
-    /// Converts thread to an async Future or Stream.
+    /// Converts Thread to an AsyncThread which implements Future and Stream traits.
     ///
-    /// Passes `args` as arguments to the thread and return `ThreadStream` object.
+    /// `args` are passed as arguments to the thread function for first call.
     /// The object call `resume()` while polling and also allows to run rust futures
     /// to completion using an executor.
+    ///
+    /// Using AsyncThread as a Stream allows to iterate through `coroutine.yield()`
+    /// values whereas Future version discards that values and poll until the final
+    /// one (returned from the thread function).
     ///
     /// # Examples
     ///
@@ -231,13 +235,12 @@ where
             _ => return Poll::Ready(None),
         };
 
-        set_waker(&lua, cx.waker().clone())?;
+        let _wg = WakerGuard::new(lua.state, cx.waker().clone());
         let ret: MultiValue = if let Some(args) = self.args0.borrow_mut().take() {
             self.thread.resume(args?)?
         } else {
             self.thread.resume(())?
         };
-        unset_waker(&lua);
 
         if is_poll_pending(&lua, &ret) {
             return Poll::Pending;
@@ -262,13 +265,12 @@ where
             _ => return Poll::Ready(Err("Thread already finished".to_lua_err())),
         };
 
-        set_waker(&lua, cx.waker().clone())?;
+        let _wg = WakerGuard::new(lua.state, cx.waker().clone());
         let ret: MultiValue = if let Some(args) = self.args0.borrow_mut().take() {
             self.thread.resume(args?)?
         } else {
             self.thread.resume(())?
         };
-        unset_waker(&lua);
 
         if is_poll_pending(&lua, &ret) {
             return Poll::Pending;
@@ -281,29 +283,6 @@ where
         }
 
         Poll::Ready(R::from_lua_multi(ret, &lua))
-    }
-}
-
-fn set_waker(lua: &Lua, waker: Waker) -> Result<()> {
-    unsafe {
-        let _sg = StackGuard::new(lua.state);
-        assert_stack(lua.state, 6);
-
-        ffi::lua_pushlightuserdata(lua.state, &WAKER_REGISTRY_KEY as *const u8 as *mut c_void);
-        push_gc_userdata(lua.state, waker)?;
-        ffi::lua_rawset(lua.state, ffi::LUA_REGISTRYINDEX);
-    }
-    Ok(())
-}
-
-fn unset_waker(lua: &Lua) {
-    unsafe {
-        let _sg = StackGuard::new(lua.state);
-        assert_stack(lua.state, 2);
-
-        ffi::lua_pushlightuserdata(lua.state, &WAKER_REGISTRY_KEY as *const u8 as *mut c_void);
-        ffi::lua_pushnil(lua.state);
-        ffi::lua_rawset(lua.state, ffi::LUA_REGISTRYINDEX);
     }
 }
 
@@ -328,4 +307,35 @@ fn is_poll_pending(lua: &Lua, val: &MultiValue) -> bool {
     }
 
     false
+}
+
+struct WakerGuard(*mut ffi::lua_State);
+
+impl WakerGuard {
+    pub fn new(state: *mut ffi::lua_State, waker: Waker) -> Result<WakerGuard> {
+        unsafe {
+            let _sg = StackGuard::new(state);
+            assert_stack(state, 6);
+
+            ffi::lua_pushlightuserdata(state, &WAKER_REGISTRY_KEY as *const u8 as *mut c_void);
+            push_gc_userdata(state, waker)?;
+            ffi::lua_rawset(state, ffi::LUA_REGISTRYINDEX);
+
+            Ok(WakerGuard(state))
+        }
+    }
+}
+
+impl Drop for WakerGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let state = self.0;
+            let _sg = StackGuard::new(state);
+            assert_stack(state, 2);
+
+            ffi::lua_pushlightuserdata(state, &WAKER_REGISTRY_KEY as *const u8 as *mut c_void);
+            ffi::lua_pushnil(state);
+            ffi::lua_rawset(state, ffi::LUA_REGISTRYINDEX);
+        }
+    }
 }

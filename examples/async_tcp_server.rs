@@ -16,7 +16,6 @@ struct LuaTcpListener(Option<Rc<Mutex<TcpListener>>>);
 struct LuaTcpStream(Rc<Mutex<TcpStream>>);
 
 impl UserData for LuaTcpListener {
-    #[cfg(any(feature = "lua53", feature = "lua52"))]
     fn add_async_methods<M: UserDataAsyncMethods<Self>>(methods: &mut M) {
         methods.add_function("bind", |_, addr: String| async {
             let listener = TcpListener::bind(addr).await?;
@@ -31,7 +30,6 @@ impl UserData for LuaTcpListener {
 }
 
 impl UserData for LuaTcpStream {
-    #[cfg(any(feature = "lua53", feature = "lua52"))]
     fn add_async_methods<M: UserDataAsyncMethods<Self>>(methods: &mut M) {
         methods.add_method("peer_addr", |_, stream, ()| async move {
             Ok(stream.0.lock().await.peer_addr()?.to_string())
@@ -68,8 +66,7 @@ async fn main() -> Result<()> {
     globals.set(
         "spawn",
         lua.create_function(move |lua: &Lua, func: Function| {
-            let thr = lua.create_thread(func)?;
-            let fut = thr.into_async::<_, ()>(());
+            let fut = lua.create_thread(func)?.into_async::<_, ()>(());
             task::spawn_local(async move { fut.await.unwrap() });
             Ok(())
         })?,
@@ -86,6 +83,7 @@ async fn main() -> Result<()> {
                     spawn(function()
                         while true do
                             local data = stream:read(100)
+                            data = data:match("^%s*(.-)%s*$") -- trim
                             print(data)
                             stream:write("got: "..data)
                             if data == "exit" then
@@ -100,7 +98,5 @@ async fn main() -> Result<()> {
         )
         .eval::<Thread>()?;
 
-    task::LocalSet::new()
-        .run_until(thread.into_async(()))
-        .await
+    task::LocalSet::new().run_until(thread.into_async(())).await
 }
