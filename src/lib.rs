@@ -69,9 +69,7 @@ pub use crate::string::String;
 pub use crate::table::{Table, TablePairs, TableSequence};
 pub use crate::thread::{AsyncThread, Thread, ThreadStatus};
 pub use crate::types::{Integer, LightUserData, Number, RegistryKey};
-pub use crate::userdata::{
-    AnyUserData, MetaMethod, UserData, UserDataMethods,
-};
+pub use crate::userdata::{AnyUserData, MetaMethod, UserData, UserDataMethods};
 pub use crate::value::{FromLua, FromLuaMulti, MultiValue, Nil, ToLua, ToLuaMulti, Value};
 
 pub mod prelude;
