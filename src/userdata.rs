@@ -149,6 +149,21 @@ pub trait UserDataMethods<T: UserData> {
         R: ToLuaMulti,
         M: 'static + FnMut(&Lua, &mut T, A) -> Result<R>;
 
+    /// Add an async method which accepts a `T` as the first parameter and returns Future.
+    /// The passed `T` is cloned from the original value.
+    ///
+    /// Refer to [`add_method`] for more information about the implementation.
+    ///
+    /// [`add_method`]: #method.add_method
+    fn add_async_method<S, A, R, M, MR>(&mut self, name: &S, method: M)
+    where
+        T: Clone,
+        S: ?Sized + AsRef<[u8]>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Fn(Lua, T, A) -> MR,
+        MR: 'static + Future<Output = Result<R>>;
+
     /// Add a regular method as a function which accepts generic arguments, the first argument will
     /// be a `UserData` of type T if the method is called with Lua method syntax:
     /// `my_userdata:my_method(arg1, arg2)`, or it is passed in as the first argument:
@@ -176,6 +191,17 @@ pub trait UserDataMethods<T: UserData> {
         A: FromLuaMulti,
         R: ToLuaMulti,
         F: 'static + FnMut(&Lua, A) -> Result<R>;
+
+    /// TODO
+    #[cfg(feature = "async")]
+    fn add_async_function<S, A, R, F, FR>(&mut self, name: &S, function: F)
+    where
+        T: Clone,
+        S: ?Sized + AsRef<[u8]>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Fn(Lua, A) -> FR,
+        FR: 'static + Future<Output = Result<R>>;
 
     /// Add a metamethod which accepts a `&T` as the first parameter.
     ///
@@ -226,33 +252,6 @@ pub trait UserDataMethods<T: UserData> {
         A: FromLuaMulti,
         R: ToLuaMulti,
         F: 'static + FnMut(&Lua, A) -> Result<R>;
-}
-
-/// Async method registry for [`UserData`] implementors.
-///
-/// [`UserData`]: trait.UserData.html
-pub trait UserDataAsyncMethods<T: UserData + Clone> {
-    /// Add an async method which accepts a `T` as the first parameter and returns Future.
-    /// The passed `T` is cloned from the original value.
-    ///
-    /// Refer to [`add_method`] for more information about the implementation.
-    ///
-    /// [`add_method`]: #method.add_method
-    fn add_method<S, A, R, M, MR>(&mut self, name: &S, method: M)
-    where
-        S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti,
-        R: ToLuaMulti,
-        M: 'static + Fn(Lua, T, A) -> MR,
-        MR: 'static + Future<Output = Result<R>>;
-
-    fn add_function<S, A, R, F, FR>(&mut self, name: &S, function: F)
-    where
-        S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti,
-        R: ToLuaMulti,
-        F: 'static + Fn(Lua, A) -> FR,
-        FR: 'static + Future<Output = Result<R>>;
 }
 
 /// Trait for custom userdata types.
@@ -319,16 +318,9 @@ pub trait UserDataAsyncMethods<T: UserData + Clone> {
 /// [`ToLua`]: trait.ToLua.html
 /// [`FromLua`]: trait.FromLua.html
 /// [`UserDataMethods`]: trait.UserDataMethods.html
-pub trait UserData: Sized + Clone {
+pub trait UserData: Sized {
     /// Adds custom methods and operators specific to this userdata.
     fn add_methods<M: UserDataMethods<Self>>(_methods: &mut M) {}
-
-    #[cfg(any(feature = "lua53", feature = "lua52"))]
-    fn add_async_methods<M: UserDataAsyncMethods<Self>>(_methods: &mut M)
-    where
-        Self: Clone,
-    {
-    }
 }
 
 /// Handle to an internal Lua userdata for any type that implements [`UserData`].

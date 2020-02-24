@@ -7,7 +7,7 @@ use tokio::prelude::*;
 use tokio::sync::Mutex;
 use tokio::task;
 
-use mlua::{Function, Lua, Result, Thread, UserData, UserDataAsyncMethods};
+use mlua::{Function, Lua, Result, Thread, UserData, UserDataMethods};
 
 #[derive(Clone)]
 struct LuaTcpListener(Option<Rc<Mutex<TcpListener>>>);
@@ -16,13 +16,13 @@ struct LuaTcpListener(Option<Rc<Mutex<TcpListener>>>);
 struct LuaTcpStream(Rc<Mutex<TcpStream>>);
 
 impl UserData for LuaTcpListener {
-    fn add_async_methods<M: UserDataAsyncMethods<Self>>(methods: &mut M) {
-        methods.add_function("bind", |_, addr: String| async {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_async_function("bind", |_, addr: String| async {
             let listener = TcpListener::bind(addr).await?;
             Ok(LuaTcpListener(Some(Rc::new(Mutex::new(listener)))))
         });
 
-        methods.add_method("accept", |_, listener, ()| async {
+        methods.add_async_method("accept", |_, listener, ()| async {
             let (stream, _) = listener.0.unwrap().lock().await.accept().await?;
             Ok(LuaTcpStream(Rc::new(Mutex::new(stream))))
         });
@@ -30,12 +30,12 @@ impl UserData for LuaTcpListener {
 }
 
 impl UserData for LuaTcpStream {
-    fn add_async_methods<M: UserDataAsyncMethods<Self>>(methods: &mut M) {
-        methods.add_method("peer_addr", |_, stream, ()| async move {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_async_method("peer_addr", |_, stream, ()| async move {
             Ok(stream.0.lock().await.peer_addr()?.to_string())
         });
 
-        methods.add_method("read", |_, stream, size: usize| async move {
+        methods.add_async_method("read", |_, stream, size: usize| async move {
             let mut buf = vec![0; size];
             let mut stream = stream.0.lock().await;
             let n = stream.read(&mut buf).await?;
@@ -43,13 +43,13 @@ impl UserData for LuaTcpStream {
             Ok(BString::from(buf))
         });
 
-        methods.add_method("write", |_, stream, data: BString| async move {
+        methods.add_async_method("write", |_, stream, data: BString| async move {
             let mut stream = stream.0.lock().await;
             let n = stream.write(&data).await?;
             Ok(n)
         });
 
-        methods.add_method("close", |_, stream, ()| async move {
+        methods.add_async_method("close", |_, stream, ()| async move {
             stream.0.lock().await.shutdown(Shutdown::Both)?;
             Ok(())
         });

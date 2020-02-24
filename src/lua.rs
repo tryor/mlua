@@ -12,7 +12,6 @@ use futures_core::future::LocalBoxFuture;
 
 #[cfg(feature = "async")]
 use {
-    crate::userdata::UserDataAsyncMethods,
     futures_task::noop_waker,
     futures_util::future::{self, FutureExt, TryFutureExt},
     std::future::Future,
@@ -1020,8 +1019,6 @@ impl Lua {
 
         let mut methods = StaticUserDataMethods::default();
         T::add_methods(&mut methods);
-        #[cfg(feature = "async")]
-        T::add_async_methods(&mut methods);
 
         protect_lua_closure(self.state, 0, 1, |state| {
             ffi::lua_newtable(state);
@@ -1525,6 +1522,20 @@ impl<T: 'static + UserData> UserDataMethods<T> for StaticUserDataMethods<T> {
             .push((name.as_ref().to_vec(), Self::box_method_mut(method)));
     }
 
+    #[cfg(feature = "async")]
+    fn add_async_method<S, A, R, M, MR>(&mut self, name: &S, method: M)
+    where
+        T: Clone,
+        S: ?Sized + AsRef<[u8]>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        M: 'static + Fn(Lua, T, A) -> MR,
+        MR: 'static + Future<Output = Result<R>>,
+    {
+        self.async_methods
+            .push((name.as_ref().to_vec(), Self::box_async_method(method)));
+    }
+
     fn add_function<S, A, R, F>(&mut self, name: &S, function: F)
     where
         S: ?Sized + AsRef<[u8]>,
@@ -1545,6 +1556,20 @@ impl<T: 'static + UserData> UserDataMethods<T> for StaticUserDataMethods<T> {
     {
         self.methods
             .push((name.as_ref().to_vec(), Self::box_function_mut(function)));
+    }
+
+    #[cfg(feature = "async")]
+    fn add_async_function<S, A, R, F, FR>(&mut self, name: &S, function: F)
+    where
+        T: Clone,
+        S: ?Sized + AsRef<[u8]>,
+        A: FromLuaMulti,
+        R: ToLuaMulti,
+        F: 'static + Fn(Lua, A) -> FR,
+        FR: 'static + Future<Output = Result<R>>,
+    {
+        self.async_methods
+            .push((name.as_ref().to_vec(), Self::box_async_function(function)));
     }
 
     fn add_meta_method<A, R, M>(&mut self, meta: MetaMethod, method: M)
@@ -1582,33 +1607,6 @@ impl<T: 'static + UserData> UserDataMethods<T> for StaticUserDataMethods<T> {
     {
         self.meta_methods
             .push((meta, Self::box_function_mut(function)));
-    }
-}
-
-#[cfg(feature = "async")]
-impl<T: 'static + UserData + Clone> UserDataAsyncMethods<T> for StaticUserDataMethods<T> {
-    fn add_method<S, A, R, M, MR>(&mut self, name: &S, method: M)
-    where
-        S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti,
-        R: ToLuaMulti,
-        M: 'static + Fn(Lua, T, A) -> MR,
-        MR: 'static + Future<Output = Result<R>>,
-    {
-        self.async_methods
-            .push((name.as_ref().to_vec(), Self::box_async_method(method)));
-    }
-
-    fn add_function<S, A, R, F, FR>(&mut self, name: &S, function: F)
-    where
-        S: ?Sized + AsRef<[u8]>,
-        A: FromLuaMulti,
-        R: ToLuaMulti,
-        F: 'static + Fn(Lua, A) -> FR,
-        FR: 'static + Future<Output = Result<R>>,
-    {
-        self.async_methods
-            .push((name.as_ref().to_vec(), Self::box_async_function(function)));
     }
 }
 

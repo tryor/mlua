@@ -70,7 +70,7 @@ pub use crate::table::{Table, TablePairs, TableSequence};
 pub use crate::thread::{AsyncThread, Thread, ThreadStatus};
 pub use crate::types::{Integer, LightUserData, Number, RegistryKey};
 pub use crate::userdata::{
-    AnyUserData, MetaMethod, UserData, UserDataAsyncMethods, UserDataMethods,
+    AnyUserData, MetaMethod, UserData, UserDataMethods,
 };
 pub use crate::value::{FromLua, FromLuaMulti, MultiValue, Nil, ToLua, ToLuaMulti, Value};
 
