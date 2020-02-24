@@ -170,7 +170,7 @@ fn coroutine_panic() {
     }
 }
 
-#[cfg(any(feature = "lua53", feature = "lua52"))]
+#[cfg(feature = "async")]
 #[test]
 fn test_thread_async() -> Result<()> {
     let lua = Lua::new();

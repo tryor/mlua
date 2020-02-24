@@ -82,7 +82,7 @@ fn test_rust_function() -> Result<()> {
     Ok(())
 }
 
-#[cfg(any(feature = "lua53", feature = "lua52"))]
+#[cfg(feature = "async")]
 #[test]
 fn test_async_function() -> Result<()> {
     let lua = Lua::new();

@@ -1,4 +1,6 @@
 use std::cell::{Ref, RefCell, RefMut};
+
+#[cfg(feature = "async")]
 use std::future::Future;
 
 use crate::error::{Error, Result};
@@ -155,6 +157,7 @@ pub trait UserDataMethods<T: UserData> {
     /// Refer to [`add_method`] for more information about the implementation.
     ///
     /// [`add_method`]: #method.add_method
+    #[cfg(feature = "async")]
     fn add_async_method<S, A, R, M, MR>(&mut self, name: &S, method: M)
     where
         T: Clone,
