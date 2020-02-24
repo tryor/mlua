@@ -27,22 +27,17 @@ pub(crate) type AsyncCallback<'a> =
 
 /// An auto generated key into the Lua registry.
 ///
-/// This is a handle to a value stored inside the Lua registry.  It is not directly usable like the
-/// `Table` or `Function` handle types, but since it doesn't hold a reference to a parent Lua and is
-/// 'static, it is much more flexible and can be used in many situations where it is impossible to
-/// directly store a normal handle type.  It is not automatically garbage collected on Drop,
-/// but it can be removed with [`Lua::remove_registry_value`], and instances not manually
-/// removed can be garbage collected with [`Lua::expire_registry_values`].
+/// This is a handle to a value stored inside the Lua registry.  It is not automatically
+/// garbage collected on Drop, but it can be removed with [`Lua::remove_registry_value`],
+/// and instances not manually removed can be garbage collected with [`Lua::expire_registry_values`].
 ///
 /// Be warned, If you place this into Lua via a `UserData` type or a rust callback, it is *very
 /// easy* to accidentally cause reference cycles that the Lua garbage collector cannot resolve.
 /// Instead of placing a `RegistryKey` into a `UserData` type, prefer instead to use
-/// [`UserData::set_user_value`] / [`UserData::get_user_value`], and instead of moving a RegistryKey
-/// into a callback, prefer [`Lua::scope`].
+/// [`UserData::set_user_value`] / [`UserData::get_user_value`].
 ///
 /// [`Lua::remove_registry_value`]: struct.Lua.html#method.remove_registry_value
 /// [`Lua::expire_registry_values`]: struct.Lua.html#method.expire_registry_values
-/// [`Lua::scope`]: struct.Lua.html#method.scope
 /// [`UserData::set_user_value`]: struct.UserData.html#method.set_user_value
 /// [`UserData::get_user_value`]: struct.UserData.html#method.get_user_value
 pub struct RegistryKey {
