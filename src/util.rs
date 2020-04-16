@@ -483,26 +483,17 @@ pub unsafe extern "C" fn error_traceback(state: *mut ffi::lua_State) -> c_int {
     1
 }
 
-// Does not call lua_checkstack, uses 2 stack spaces.
-#[cfg(any(feature = "lua51", feature = "luajit"))]
-pub unsafe fn set_main_state(state: *mut ffi::lua_State) {
-    ffi::lua_pushlightuserdata(state, &MAIN_THREAD_REGISTRY_KEY as *const u8 as *mut c_void);
-    ffi::lua_pushthread(state);
-    ffi::lua_rawset(state, ffi::LUA_REGISTRYINDEX);
-}
-
 // Does not call lua_checkstack, uses 1 stack space.
 pub unsafe fn get_main_state(state: *mut ffi::lua_State) -> *mut ffi::lua_State {
     #[cfg(any(feature = "lua53", feature = "lua52"))]
-    ffi::lua_rawgeti(state, ffi::LUA_REGISTRYINDEX, ffi::LUA_RIDX_MAINTHREAD);
-    #[cfg(any(feature = "lua51", feature = "luajit"))]
     {
-        ffi::lua_pushlightuserdata(state, &MAIN_THREAD_REGISTRY_KEY as *const u8 as *mut c_void);
-        ffi::lua_rawget(state, ffi::LUA_REGISTRYINDEX);
+        ffi::lua_rawgeti(state, ffi::LUA_REGISTRYINDEX, ffi::LUA_RIDX_MAINTHREAD);
+        let main_state = ffi::lua_tothread(state, -1);
+        ffi::lua_pop(state, 1);
+        main_state
     }
-    let main_state = ffi::lua_tothread(state, -1);
-    ffi::lua_pop(state, 1);
-    main_state
+    #[cfg(any(feature = "lua51", feature = "luajit"))]
+    state
 }
 
 // Pushes a WrappedError to the top of the stack.  Uses two stack spaces and does not call
@@ -744,7 +735,5 @@ unsafe fn get_destructed_userdata_metatable(state: *mut ffi::lua_State) {
     ffi::lua_rawget(state, ffi::LUA_REGISTRYINDEX);
 }
 
-#[cfg(any(feature = "lua51", feature = "luajit"))]
-static MAIN_THREAD_REGISTRY_KEY: u8 = 0;
 static DESTRUCTED_USERDATA_METATABLE: u8 = 0;
 static ERROR_PRINT_BUFFER_KEY: u8 = 0;

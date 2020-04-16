@@ -27,8 +27,6 @@ use crate::table::Table;
 use crate::thread::Thread;
 use crate::types::{AsyncCallback, Callback, Integer, LightUserData, LuaRef, Number, RegistryKey};
 use crate::userdata::{AnyUserData, MetaMethod, UserData, UserDataMethods};
-#[cfg(any(feature = "lua51", feature = "luajit"))]
-use crate::util::set_main_state;
 use crate::util::{
     assert_stack, callback_error, check_stack, get_gc_userdata, get_main_state,
     get_meta_gc_userdata, get_wrapped_error, init_error_registry, init_gc_metatable_for,
@@ -128,13 +126,7 @@ impl Lua {
 
     /// Constructs a new Lua instance from the existing state.
     pub unsafe fn init_from_ptr(state: *mut ffi::lua_State) -> Lua {
-        #[cfg(any(feature = "lua53", feature = "lua52"))]
         let main_state = get_main_state(state);
-        #[cfg(any(feature = "lua51", feature = "luajit"))]
-        let main_state = {
-            set_main_state(state);
-            state
-        };
         let main_state_top = ffi::lua_gettop(state);
 
         let ref_thread = mlua_expect!(
