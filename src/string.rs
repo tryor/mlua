@@ -9,9 +9,9 @@ use crate::util::{assert_stack, StackGuard};
 ///
 /// Unlike Rust strings, Lua strings may not be valid UTF-8.
 #[derive(Clone, Debug)]
-pub struct String(pub(crate) LuaRef);
+pub struct String<'lua>(pub(crate) LuaRef<'lua>);
 
-impl String {
+impl<'lua> String<'lua> {
     /// Get a `&str` slice if the Lua string is valid UTF-8.
     ///
     /// # Examples
@@ -62,7 +62,7 @@ impl String {
 
     /// Get the bytes that make up this string, including the trailing nul byte.
     pub fn as_bytes_with_nul(&self) -> &[u8] {
-        let lua = &self.0.lua;
+        let lua = self.0.lua;
         unsafe {
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 1);
@@ -83,7 +83,7 @@ impl String {
     }
 }
 
-impl AsRef<[u8]> for String {
+impl<'lua> AsRef<[u8]> for String<'lua> {
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
     }
@@ -97,7 +97,7 @@ impl AsRef<[u8]> for String {
 // The only downside is that this disallows a comparison with `Cow<str>`, as that only implements
 // `AsRef<str>`, which collides with this impl. Requiring `AsRef<str>` would fix that, but limit us
 // in other ways.
-impl<T> PartialEq<T> for String
+impl<'lua, T> PartialEq<T> for String<'lua>
 where
     T: AsRef<[u8]>,
 {

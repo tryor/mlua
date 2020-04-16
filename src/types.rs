@@ -20,10 +20,11 @@ pub type Number = ffi::lua_Number;
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct LightUserData(pub *mut c_void);
 
-pub(crate) type Callback<'a> = Box<dyn Fn(Lua, MultiValue) -> Result<MultiValue> + 'a>;
+pub(crate) type Callback<'lua, 'a> =
+    Box<dyn Fn(&'lua Lua, MultiValue<'lua>) -> Result<MultiValue<'lua>> + 'a>;
 
-pub(crate) type AsyncCallback<'a> =
-    Box<dyn Fn(Lua, MultiValue) -> LocalBoxFuture<'a, Result<MultiValue>> + 'a>;
+pub(crate) type AsyncCallback<'lua, 'a> =
+    Box<dyn Fn(&'lua Lua, MultiValue<'lua>) -> LocalBoxFuture<'lua, Result<MultiValue<'lua>>> + 'a>;
 
 /// An auto generated key into the Lua registry.
 ///
@@ -72,32 +73,32 @@ impl RegistryKey {
     }
 }
 
-pub(crate) struct LuaRef {
-    pub(crate) lua: Lua,
+pub(crate) struct LuaRef<'lua> {
+    pub(crate) lua: &'lua Lua,
     pub(crate) index: c_int,
 }
 
-impl fmt::Debug for LuaRef {
+impl<'lua> fmt::Debug for LuaRef<'lua> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Ref({})", self.index)
     }
 }
 
-impl Clone for LuaRef {
+impl<'lua> Clone for LuaRef<'lua> {
     fn clone(&self) -> Self {
         self.lua.clone_ref(self)
     }
 }
 
-impl Drop for LuaRef {
+impl<'lua> Drop for LuaRef<'lua> {
     fn drop(&mut self) {
-        self.lua.clone().drop_ref(self)
+        self.lua.drop_ref(self)
     }
 }
 
-impl PartialEq for LuaRef {
+impl<'lua> PartialEq for LuaRef<'lua> {
     fn eq(&self, other: &Self) -> bool {
-        let lua = &self.lua;
+        let lua = self.lua;
         unsafe {
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 2);

@@ -33,17 +33,17 @@ pub enum ThreadStatus {
 
 /// Handle to an internal Lua thread (or coroutine).
 #[derive(Clone, Debug)]
-pub struct Thread(pub(crate) LuaRef);
+pub struct Thread<'lua>(pub(crate) LuaRef<'lua>);
 
 /// Thread (coroutine) representation as an async Future or Stream.
 #[derive(Debug)]
-pub struct AsyncThread<R> {
-    thread: Thread,
-    args0: RefCell<Option<Result<MultiValue>>>,
+pub struct AsyncThread<'lua, R> {
+    thread: Thread<'lua>,
+    args0: RefCell<Option<Result<MultiValue<'lua>>>>,
     ret: PhantomData<R>,
 }
 
-impl Thread {
+impl<'lua> Thread<'lua> {
     /// Resumes execution of this thread.
     ///
     /// Equivalent to `coroutine.resume`.
@@ -87,10 +87,10 @@ impl Thread {
     /// ```
     pub fn resume<A, R>(&self, args: A) -> Result<R>
     where
-        A: ToLuaMulti,
-        R: FromLuaMulti,
+        A: ToLuaMulti<'lua>,
+        R: FromLuaMulti<'lua>,
     {
-        let lua = &self.0.lua;
+        let lua = self.0.lua;
         let args = args.to_lua_multi(lua)?;
         let results = unsafe {
             let _sg = StackGuard::new(lua.state);
@@ -139,7 +139,7 @@ impl Thread {
 
     /// Gets the status of the thread.
     pub fn status(&self) -> ThreadStatus {
-        let lua = &self.0.lua;
+        let lua = self.0.lua;
         unsafe {
             let _sg = StackGuard::new(lua.state);
             assert_stack(lua.state, 1);
@@ -201,10 +201,10 @@ impl Thread {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn into_async<A, R>(self, args: A) -> AsyncThread<R>
+    pub fn into_async<A, R>(self, args: A) -> AsyncThread<'lua, R>
     where
-        A: ToLuaMulti,
-        R: FromLuaMulti,
+        A: ToLuaMulti<'lua>,
+        R: FromLuaMulti<'lua>,
     {
         let args = args.to_lua_multi(&self.0.lua);
         AsyncThread {
@@ -215,20 +215,20 @@ impl Thread {
     }
 }
 
-impl PartialEq for Thread {
+impl<'lua> PartialEq for Thread<'lua> {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
 }
 
-impl<R> Stream for AsyncThread<R>
+impl<'lua, R> Stream for AsyncThread<'lua, R>
 where
-    R: FromLuaMulti,
+    R: FromLuaMulti<'lua>,
 {
     type Item = Result<R>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let lua = self.thread.0.lua.clone();
+        let lua = self.thread.0.lua;
 
         match self.thread.status() {
             ThreadStatus::Resumable => {}
@@ -242,23 +242,23 @@ where
             self.thread.resume(())?
         };
 
-        if is_poll_pending(&lua, &ret) {
+        if is_poll_pending(lua, &ret) {
             return Poll::Pending;
         }
 
         cx.waker().wake_by_ref();
-        Poll::Ready(Some(R::from_lua_multi(ret, &lua)))
+        Poll::Ready(Some(R::from_lua_multi(ret, lua)))
     }
 }
 
-impl<R> Future for AsyncThread<R>
+impl<'lua, R> Future for AsyncThread<'lua, R>
 where
-    R: FromLuaMulti,
+    R: FromLuaMulti<'lua>,
 {
     type Output = Result<R>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let lua = self.thread.0.lua.clone();
+        let lua = self.thread.0.lua;
 
         match self.thread.status() {
             ThreadStatus::Resumable => {}
@@ -272,7 +272,7 @@ where
             self.thread.resume(())?
         };
 
-        if is_poll_pending(&lua, &ret) {
+        if is_poll_pending(lua, &ret) {
             return Poll::Pending;
         }
 
@@ -282,7 +282,7 @@ where
             return Poll::Pending;
         }
 
-        Poll::Ready(R::from_lua_multi(ret, &lua))
+        Poll::Ready(R::from_lua_multi(ret, lua))
     }
 }
 

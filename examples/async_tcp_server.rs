@@ -16,7 +16,7 @@ struct LuaTcpListener(Option<Rc<Mutex<TcpListener>>>);
 struct LuaTcpStream(Rc<Mutex<TcpStream>>);
 
 impl UserData for LuaTcpListener {
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_async_function("bind", |_, addr: String| async {
             let listener = TcpListener::bind(addr).await?;
             Ok(LuaTcpListener(Some(Rc::new(Mutex::new(listener)))))
@@ -30,7 +30,7 @@ impl UserData for LuaTcpListener {
 }
 
 impl UserData for LuaTcpStream {
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_async_method("peer_addr", |_, stream, ()| async move {
             Ok(stream.0.lock().await.peer_addr()?.to_string())
         });
@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
                             local data = stream:read(100)
                             data = data:match("^%s*(.-)%s*$") -- trim
                             print(data)
-                            stream:write("got: "..data)
+                            stream:write("got: "..data.."\n")
                             if data == "exit" then
                                 stream:close()
                                 break

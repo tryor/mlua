@@ -263,22 +263,30 @@ pub unsafe fn take_userdata<T>(state: *mut ffi::lua_State) -> T {
 // Pushes the userdata and attaches a metatable with __gc method
 // Internally uses 5 stack spaces, does not call checkstack
 pub unsafe fn push_gc_userdata<T: Any>(state: *mut ffi::lua_State, t: T) -> Result<()> {
+    push_meta_gc_userdata::<T, T>(state, t)
+}
+
+pub unsafe fn push_meta_gc_userdata<MT: Any, T>(state: *mut ffi::lua_State, t: T) -> Result<()> {
     let ud = protect_lua_closure(state, 0, 1, move |state| {
         ffi::lua_newuserdata(state, mem::size_of::<T>()) as *mut T
     })?;
     ptr::write(ud, t);
-    get_gc_metatable_for::<T>(state);
+    get_gc_metatable_for::<MT>(state);
     ffi::lua_setmetatable(state, -2);
     Ok(())
 }
 
 // Uses 2 stack spaces, does not call checkstack
 pub unsafe fn get_gc_userdata<T: Any>(state: *mut ffi::lua_State, index: c_int) -> *mut T {
+    get_meta_gc_userdata::<T, T>(state, index)
+}
+
+pub unsafe fn get_meta_gc_userdata<MT: Any, T>(state: *mut ffi::lua_State, index: c_int) -> *mut T {
     let ud = ffi::lua_touserdata(state, index) as *mut T;
     if ud.is_null() || ffi::lua_getmetatable(state, index) == 0 {
         return ptr::null_mut();
     }
-    get_gc_metatable_for::<T>(state);
+    get_gc_metatable_for::<MT>(state);
     let res = ffi::lua_rawequal(state, -1, -2) != 0;
     ffi::lua_pop(state, 2);
     if !res {

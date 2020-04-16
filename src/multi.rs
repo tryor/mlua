@@ -8,8 +8,8 @@ use crate::value::{FromLua, FromLuaMulti, MultiValue, Nil, ToLua, ToLuaMulti};
 
 /// Result is convertible to `MultiValue` following the common Lua idiom of returning the result
 /// on success, or in the case of an error, returning `nil` and an error message.
-impl<T: ToLua, E: ToLua> ToLuaMulti for StdResult<T, E> {
-    fn to_lua_multi(self, lua: &Lua) -> Result<MultiValue> {
+impl<'lua, T: ToLua<'lua>, E: ToLua<'lua>> ToLuaMulti<'lua> for StdResult<T, E> {
+    fn to_lua_multi(self, lua: &'lua Lua) -> Result<MultiValue<'lua>> {
         let mut result = MultiValue::new();
 
         match self {
@@ -24,28 +24,28 @@ impl<T: ToLua, E: ToLua> ToLuaMulti for StdResult<T, E> {
     }
 }
 
-impl<T: ToLua> ToLuaMulti for T {
-    fn to_lua_multi(self, lua: &Lua) -> Result<MultiValue> {
+impl<'lua, T: ToLua<'lua>> ToLuaMulti<'lua> for T {
+    fn to_lua_multi(self, lua: &'lua Lua) -> Result<MultiValue<'lua>> {
         let mut v = MultiValue::new();
         v.push_front(self.to_lua(lua)?);
         Ok(v)
     }
 }
 
-impl<T: FromLua> FromLuaMulti for T {
-    fn from_lua_multi(mut values: MultiValue, lua: &Lua) -> Result<Self> {
+impl<'lua, T: FromLua<'lua>> FromLuaMulti<'lua> for T {
+    fn from_lua_multi(mut values: MultiValue<'lua>, lua: &'lua Lua) -> Result<Self> {
         Ok(T::from_lua(values.pop_front().unwrap_or(Nil), lua)?)
     }
 }
 
-impl ToLuaMulti for MultiValue {
-    fn to_lua_multi(self, _: &Lua) -> Result<MultiValue> {
+impl<'lua> ToLuaMulti<'lua> for MultiValue<'lua> {
+    fn to_lua_multi(self, _: &'lua Lua) -> Result<MultiValue<'lua>> {
         Ok(self)
     }
 }
 
-impl FromLuaMulti for MultiValue {
-    fn from_lua_multi(values: MultiValue, _: &Lua) -> Result<Self> {
+impl<'lua> FromLuaMulti<'lua> for MultiValue<'lua> {
+    fn from_lua_multi(values: MultiValue<'lua>, _: &'lua Lua) -> Result<Self> {
         Ok(values)
     }
 }
@@ -121,14 +121,14 @@ impl<T> DerefMut for Variadic<T> {
     }
 }
 
-impl<T: ToLua> ToLuaMulti for Variadic<T> {
-    fn to_lua_multi(self, lua: &Lua) -> Result<MultiValue> {
+impl<'lua, T: ToLua<'lua>> ToLuaMulti<'lua> for Variadic<T> {
+    fn to_lua_multi(self, lua: &'lua Lua) -> Result<MultiValue<'lua>> {
         self.0.into_iter().map(|e| e.to_lua(lua)).collect()
     }
 }
 
-impl<T: FromLua> FromLuaMulti for Variadic<T> {
-    fn from_lua_multi(values: MultiValue, lua: &Lua) -> Result<Self> {
+impl<'lua, T: FromLua<'lua>> FromLuaMulti<'lua> for Variadic<T> {
+    fn from_lua_multi(values: MultiValue<'lua>, lua: &'lua Lua) -> Result<Self> {
         values
             .into_iter()
             .map(|e| T::from_lua(e, lua))
@@ -139,27 +139,27 @@ impl<T: FromLua> FromLuaMulti for Variadic<T> {
 
 macro_rules! impl_tuple {
     () => (
-        impl ToLuaMulti for () {
-            fn to_lua_multi(self, _: &Lua) -> Result<MultiValue> {
+        impl<'lua> ToLuaMulti<'lua> for () {
+            fn to_lua_multi(self, _: &'lua Lua) -> Result<MultiValue<'lua>> {
                 Ok(MultiValue::new())
             }
         }
 
-        impl FromLuaMulti for () {
-            fn from_lua_multi(_: MultiValue, _: &Lua) -> Result<Self> {
+        impl<'lua> FromLuaMulti<'lua> for () {
+            fn from_lua_multi(_: MultiValue<'lua>, _: &'lua Lua) -> Result<Self> {
                 Ok(())
             }
         }
     );
 
     ($last:ident $($name:ident)*) => (
-        impl<$($name,)* $last> ToLuaMulti for ($($name,)* $last,)
-            where $($name: ToLua,)*
-                  $last: ToLuaMulti
+        impl<'lua, $($name,)* $last> ToLuaMulti<'lua> for ($($name,)* $last,)
+            where $($name: ToLua<'lua>,)*
+                  $last: ToLuaMulti<'lua>
         {
             #[allow(unused_mut)]
             #[allow(non_snake_case)]
-            fn to_lua_multi(self, lua: &Lua) -> Result<MultiValue> {
+            fn to_lua_multi(self, lua: &'lua Lua) -> Result<MultiValue<'lua>> {
                 let ($($name,)* $last,) = self;
 
                 let mut results = $last.to_lua_multi(lua)?;
@@ -168,13 +168,13 @@ macro_rules! impl_tuple {
             }
         }
 
-        impl<$($name,)* $last> FromLuaMulti for ($($name,)* $last,)
-            where $($name: FromLua,)*
-                  $last: FromLuaMulti
+        impl<'lua, $($name,)* $last> FromLuaMulti<'lua> for ($($name,)* $last,)
+            where $($name: FromLua<'lua>,)*
+                  $last: FromLuaMulti<'lua>
         {
             #[allow(unused_mut)]
             #[allow(non_snake_case)]
-            fn from_lua_multi(mut values: MultiValue, lua: &Lua) -> Result<Self> {
+            fn from_lua_multi(mut values: MultiValue<'lua>, lua: &'lua Lua) -> Result<Self> {
                 $(let $name = values.pop_front().unwrap_or(Nil);)*
                 let $last = FromLuaMulti::from_lua_multi(values, lua)?;
                 Ok(($(FromLua::from_lua($name, lua)?,)* $last,))
