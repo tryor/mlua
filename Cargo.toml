@@ -25,9 +25,9 @@ members = [
 ]
 
 [features]
-default = ["lua53"]
-lua53 = ["async"]
-lua52 = ["async"]
+default = ["lua53", "async"]
+lua53 = []
+lua52 = []
 lua51 = []
 luajit = []
 vendored = ["lua-src", "luajit-src"]

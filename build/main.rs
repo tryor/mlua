@@ -82,8 +82,8 @@ fn main() {
     panic!("You can enable only one of the features: lua53, lua52, lua51, luajit");
 
     // Async
-    #[cfg(all(feature = "async", not(any(feature = "lua53", feature = "lua52"))))]
-    panic!("You can enable async only for: lua53, lua52");
+    // #[cfg(all(feature = "async", not(any(feature = "lua53", feature = "lua52"))))]
+    // panic!("You can enable async only for: lua53, lua52");
 
     let include_dir = find::probe_lua();
     build_glue(&include_dir);

@@ -1087,7 +1087,7 @@ impl Lua {
                     check_stack(state, ffi::LUA_MINSTACK - nargs)?;
                 }
 
-                let lua = &mut (*lua);
+                let lua = &mut *lua;
                 lua.state = state;
 
                 let mut args = MultiValue::new();
@@ -1128,6 +1128,9 @@ impl Lua {
         &'lua self,
         func: AsyncCallback<'callback, 'static>,
     ) -> Result<Function<'lua>> {
+        #[cfg(any(feature = "lua53", feature = "lua52"))]
+        self.load_from_std_lib(StdLib::COROUTINE)?;
+
         unsafe extern "C" fn call_callback(state: *mut ffi::lua_State) -> c_int {
             callback_error(state, |nargs| {
                 let func = get_meta_gc_userdata::<AsyncCallback, AsyncCallback>(
@@ -1143,7 +1146,7 @@ impl Lua {
                     check_stack(state, ffi::LUA_MINSTACK - nargs)?;
                 }
 
-                let lua = &mut (*lua);
+                let lua = &mut *lua;
                 lua.state = state;
 
                 let mut args = MultiValue::new();
@@ -1154,23 +1157,30 @@ impl Lua {
 
                 let fut = (*func)(lua, args);
                 push_gc_userdata(state, fut)?;
+                push_gc_userdata(state, lua.clone())?;
+
+                ffi::lua_pushcclosure(state, poll_future, 2);
 
                 Ok(1)
-            });
-
-            poll_future(state)
+            })
         }
 
         unsafe extern "C" fn poll_future(state: *mut ffi::lua_State) -> c_int {
-            let mut do_yield = false;
-            let r = callback_error(state, |_nargs| {
-                let fut = get_gc_userdata::<LocalBoxFuture<Result<MultiValue>>>(state, -1);
+            callback_error(state, |nargs| {
+                let fut = get_gc_userdata::<LocalBoxFuture<Result<MultiValue>>>(
+                    state,
+                    ffi::lua_upvalueindex(1),
+                );
                 let lua = get_gc_userdata::<Lua>(state, ffi::lua_upvalueindex(2));
-
                 if fut.is_null() || lua.is_null() {
                     return Err(Error::CallbackDestructed);
                 }
 
+                if nargs < ffi::LUA_MINSTACK {
+                    check_stack(state, ffi::LUA_MINSTACK - nargs)?;
+                }
+
+                let lua = &mut *lua;
                 let mut waker = noop_waker();
 
                 // Try to get an outer poll waker
@@ -1188,45 +1198,23 @@ impl Lua {
 
                 match (*fut).as_mut().poll(&mut ctx) {
                     Poll::Pending => {
+                        check_stack(state, 6)?;
+                        ffi::lua_pushboolean(state, 0);
                         push_gc_userdata(state, AsyncPollPending)?;
-                        do_yield = true;
-                        Ok(1)
+                        Ok(2)
                     }
                     Poll::Ready(results) => {
-                        let results = results?;
-                        let nresults = results.len() as c_int;
-
-                        check_stack(state, nresults)?;
-                        for r in results {
-                            (*lua).push_value(r)?;
-                        }
-
-                        Ok(nresults)
+                        let results = lua.create_sequence_from(results?)?;
+                        check_stack(state, 2)?;
+                        ffi::lua_pushboolean(state, 1);
+                        lua.push_value(Value::Table(results))?;
+                        Ok(2)
                     }
                 }
-            });
-            if do_yield {
-                ffi::lua_yieldk(state, 1, 0, Some(continue_poll));
-                unreachable!();
-            }
-            r
+            })
         }
 
-        #[cfg(feature = "lua53")]
-        unsafe extern "C" fn continue_poll(
-            state: *mut ffi::lua_State,
-            _status: c_int,
-            _ctx: ffi::lua_KContext,
-        ) -> c_int {
-            poll_future(state)
-        }
-
-        #[cfg(feature = "lua52")]
-        unsafe extern "C" fn continue_poll(state: *mut ffi::lua_State) -> c_int {
-            poll_future(state)
-        }
-
-        unsafe {
+        let get_poll = unsafe {
             let _sg = StackGuard::new(self.state);
             assert_stack(self.state, 6);
 
@@ -1237,8 +1225,36 @@ impl Lua {
                 ffi::lua_pushcclosure(state, call_callback, 2);
             })?;
 
-            Ok(Function(self.pop_ref()))
-        }
+            Function(self.pop_ref())
+        };
+
+        let env = self.create_table()?;
+        env.set("get_poll", get_poll)?;
+        env.set("coroutine", self.globals().get::<_, Value>("coroutine")?)?;
+        env.set(
+            "unpack",
+            self.create_function(|_, tbl: Table| {
+                Ok(MultiValue::from_vec(
+                    tbl.sequence_values().collect::<Result<Vec<Value>>>()?,
+                ))
+            })?,
+        )?;
+
+        self.load(
+            r#"
+            local poll = get_poll(...)
+            while true do
+                ready, res = poll()
+                if ready then
+                    return unpack(res)
+                end
+                coroutine.yield(res)
+            end
+            "#,
+        )
+        .set_name("_mlua_async_poll")?
+        .set_environment(env)?
+        .into_function()
     }
 
     pub(crate) unsafe fn make_userdata<T>(&self, data: T) -> Result<AnyUserData>
