@@ -1,13 +1,13 @@
 [package]
 name = "mlua"
-version = "0.2.2"
+version = "0.3.0-alpha.1"
 authors = ["Aleksandr Orlenko <zxteam@pm.me>", "kyren <catherine@chucklefish.org>"]
 edition = "2018"
 repository = "https://github.com/khvzak/mlua"
 documentation = "https://docs.rs/mlua"
 readme = "README.md"
-keywords = ["lua", "luajit"]
-categories = ["api-bindings"]
+keywords = ["lua", "luajit", "async", "futures"]
+categories = ["api-bindings", "asynchronous"]
 license = "MIT"
 links = "lua"
 build = "build/main.rs"
