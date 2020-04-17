@@ -100,8 +100,8 @@ fn test_thread() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_thread_stream() -> Result<()> {
+#[tokio::test]
+async fn test_thread_stream() -> Result<()> {
     let lua = Lua::new();
 
     let thread = lua.create_thread(
@@ -120,16 +120,13 @@ fn test_thread_stream() -> Result<()> {
         .eval()?,
     )?;
 
-    let result = block_on(async {
-        let mut s = thread.into_async::<_, i64>(0);
-        let mut sum = 0;
-        while let Some(n) = s.try_next().await? {
-            sum += n;
-        }
-        Ok::<_, Error>(sum)
-    })?;
+    let mut s = thread.into_async::<_, i64>(0);
+    let mut sum = 0;
+    while let Some(n) = s.try_next().await? {
+        sum += n;
+    }
 
-    assert_eq!(result, 275);
+    assert_eq!(sum, 275);
 
     Ok(())
 }
@@ -171,11 +168,11 @@ fn coroutine_panic() {
 }
 
 #[cfg(feature = "async")]
-#[test]
-fn test_thread_async() -> Result<()> {
+#[tokio::test]
+async fn test_thread_async() -> Result<()> {
     let lua = Lua::new();
 
-    let cnt = Rc::new(1);
+    let cnt = Rc::new(1); // sleep 1 second
     let cnt2 = cnt.clone();
     let f = lua.create_async_function(move |_lua, ()| {
         let cnt3 = cnt2.clone();
@@ -186,12 +183,9 @@ fn test_thread_async() -> Result<()> {
     })?;
 
     let mut thread_s = lua.create_thread(f)?.into_async(());
-    let val = block_on(async move {
-        if let Some(s) = thread_s.try_next().await? {
-            return Ok::<_, Error>(s);
-        }
-        Ok::<_, Error>(String::new())
-    })?;
+    let val: String = thread_s.try_next().await?.unwrap_or_default();
+
+    // thread_s is non-resumable and subject to garbage collection
 
     lua.gc_collect()?;
     assert_eq!(Rc::strong_count(&cnt), 1);

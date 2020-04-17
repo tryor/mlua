@@ -83,8 +83,8 @@ fn test_rust_function() -> Result<()> {
 }
 
 #[cfg(feature = "async")]
-#[test]
-fn test_async_function() -> Result<()> {
+#[tokio::test]
+async fn test_async_function() -> Result<()> {
     let lua = Lua::new();
 
     let f = lua.create_async_function(move |_lua, n: u64| async move {
@@ -106,12 +106,9 @@ fn test_async_function() -> Result<()> {
         )
         .eval::<Thread>()?;
 
-    block_on(async {
-        let fut = thread.into_async(());
-        let ret: StdString = fut.await?;
-        assert_eq!(ret, "world");
-        Ok::<_, Error>(())
-    })?;
+    let fut = thread.into_async(());
+    let ret: StdString = fut.await?;
+    assert_eq!(ret, "world");
 
     Ok(())
 }
