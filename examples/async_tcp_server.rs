@@ -77,6 +77,7 @@ async fn main() -> Result<()> {
             r#"
             coroutine.create(function ()
                 local listener = tcp.bind("0.0.0.0:1234")
+                print("listening on 0.0.0.0:1234")
                 while true do
                     local stream = listener:accept()
                     print("connected from " .. stream:peer_addr())
@@ -98,5 +99,5 @@ async fn main() -> Result<()> {
         )
         .eval::<Thread>()?;
 
-    task::LocalSet::new().run_until(thread.into_async(())).await
+    thread.into_async(()).await
 }
