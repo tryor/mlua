@@ -1,20 +1,30 @@
-use std::cell::RefCell;
-use std::marker::PhantomData;
-use std::os::raw::{c_int, c_void};
-use std::pin::Pin;
-use std::task::{Context, Poll, Waker};
+use std::os::raw::c_int;
 
-use futures_core::{future::Future, stream::Stream};
-
-use crate::error::{Error, ExternalError, Result};
+use crate::error::{Error, Result};
 use crate::ffi;
-use crate::lua::{AsyncPollPending, Lua, WAKER_REGISTRY_KEY};
 use crate::types::LuaRef;
 use crate::util::{
-    assert_stack, check_stack, error_traceback, get_gc_userdata, pop_error, protect_lua_closure,
-    push_gc_userdata, StackGuard,
+    assert_stack, check_stack, error_traceback, pop_error, protect_lua_closure, StackGuard,
 };
-use crate::value::{FromLuaMulti, MultiValue, ToLuaMulti, Value};
+use crate::value::{FromLuaMulti, MultiValue, ToLuaMulti};
+
+#[cfg(feature = "async")]
+use {
+    crate::{
+        error::ExternalError,
+        lua::{AsyncPollPending, Lua, WAKER_REGISTRY_KEY},
+        util::{get_gc_userdata, push_gc_userdata},
+        value::Value,
+    },
+    futures_core::{future::Future, stream::Stream},
+    std::{
+        cell::RefCell,
+        marker::PhantomData,
+        os::raw::c_void,
+        pin::Pin,
+        task::{Context, Poll, Waker},
+    },
+};
 
 /// Status of a Lua thread (or coroutine).
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -36,6 +46,7 @@ pub enum ThreadStatus {
 pub struct Thread<'lua>(pub(crate) LuaRef<'lua>);
 
 /// Thread (coroutine) representation as an async Future or Stream.
+#[cfg(feature = "async")]
 #[derive(Debug)]
 pub struct AsyncThread<'lua, R> {
     thread: Thread<'lua>,
@@ -201,6 +212,7 @@ impl<'lua> Thread<'lua> {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(feature = "async")]
     pub fn into_async<A, R>(self, args: A) -> AsyncThread<'lua, R>
     where
         A: ToLuaMulti<'lua>,
@@ -221,6 +233,7 @@ impl<'lua> PartialEq for Thread<'lua> {
     }
 }
 
+#[cfg(feature = "async")]
 impl<'lua, R> Stream for AsyncThread<'lua, R>
 where
     R: FromLuaMulti<'lua>,
@@ -251,6 +264,7 @@ where
     }
 }
 
+#[cfg(feature = "async")]
 impl<'lua, R> Future for AsyncThread<'lua, R>
 where
     R: FromLuaMulti<'lua>,
@@ -286,6 +300,7 @@ where
     }
 }
 
+#[cfg(feature = "async")]
 fn is_poll_pending(lua: &Lua, val: &MultiValue) -> bool {
     if val.len() != 1 {
         return false;
@@ -309,8 +324,10 @@ fn is_poll_pending(lua: &Lua, val: &MultiValue) -> bool {
     false
 }
 
+#[cfg(feature = "async")]
 struct WakerGuard(*mut ffi::lua_State);
 
+#[cfg(feature = "async")]
 impl WakerGuard {
     pub fn new(state: *mut ffi::lua_State, waker: Waker) -> Result<WakerGuard> {
         unsafe {
@@ -326,6 +343,7 @@ impl WakerGuard {
     }
 }
 
+#[cfg(feature = "async")]
 impl Drop for WakerGuard {
     fn drop(&mut self) {
         unsafe {

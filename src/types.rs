@@ -3,6 +3,7 @@ use std::os::raw::{c_int, c_void};
 use std::rc::Rc;
 use std::{fmt, mem, ptr};
 
+#[cfg(feature = "async")]
 use futures_core::future::LocalBoxFuture;
 
 use crate::error::Result;
@@ -23,6 +24,7 @@ pub struct LightUserData(pub *mut c_void);
 pub(crate) type Callback<'lua, 'a> =
     Box<dyn Fn(&'lua Lua, MultiValue<'lua>) -> Result<MultiValue<'lua>> + 'a>;
 
+#[cfg(feature = "async")]
 pub(crate) type AsyncCallback<'lua, 'a> =
     Box<dyn Fn(&'lua Lua, MultiValue<'lua>) -> LocalBoxFuture<'lua, Result<MultiValue<'lua>>> + 'a>;
 

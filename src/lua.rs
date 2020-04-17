@@ -5,18 +5,7 @@ use std::ffi::CString;
 use std::marker::PhantomData;
 use std::os::raw::{c_char, c_int};
 use std::rc::Rc;
-use std::task::Waker;
 use std::{mem, ptr, str};
-
-use futures_core::future::LocalBoxFuture;
-
-#[cfg(feature = "async")]
-use {
-    futures_task::noop_waker,
-    futures_util::future::{self, FutureExt, TryFutureExt},
-    std::future::Future,
-    std::task::{Context, Poll},
-};
 
 use crate::error::{Error, Result};
 use crate::ffi;
@@ -25,7 +14,7 @@ use crate::stdlib::StdLib;
 use crate::string::String;
 use crate::table::Table;
 use crate::thread::Thread;
-use crate::types::{AsyncCallback, Callback, Integer, LightUserData, LuaRef, Number, RegistryKey};
+use crate::types::{Callback, Integer, LightUserData, LuaRef, Number, RegistryKey};
 use crate::userdata::{AnyUserData, MetaMethod, UserData, UserDataMethods};
 use crate::util::{
     assert_stack, callback_error, check_stack, get_gc_userdata, get_main_state,
@@ -34,6 +23,18 @@ use crate::util::{
     push_meta_gc_userdata, push_string, push_userdata, push_wrapped_error, StackGuard,
 };
 use crate::value::{FromLua, FromLuaMulti, MultiValue, Nil, ToLua, ToLuaMulti, Value};
+
+#[cfg(feature = "async")]
+use {
+    crate::types::AsyncCallback,
+    futures_core::future::LocalBoxFuture,
+    futures_task::noop_waker,
+    futures_util::future::{self, FutureExt, TryFutureExt},
+    std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    },
+};
 
 /// Top level Lua struct which holds the Lua state itself.
 pub struct Lua {
@@ -56,7 +57,9 @@ struct ExtraData {
     ref_free: Vec<c_int>,
 }
 
+#[cfg(feature = "async")]
 pub(crate) struct AsyncPollPending;
+#[cfg(feature = "async")]
 pub(crate) static WAKER_REGISTRY_KEY: u8 = 0;
 
 impl Drop for Lua {
@@ -137,11 +140,14 @@ impl Lua {
                 // to prevent them from being garbage collected.
 
                 init_gc_metatable_for::<Callback>(state, None);
-                init_gc_metatable_for::<AsyncCallback>(state, None);
-                init_gc_metatable_for::<LocalBoxFuture<Result<MultiValue>>>(state, None);
-                init_gc_metatable_for::<AsyncPollPending>(state, None);
-                init_gc_metatable_for::<Waker>(state, None);
                 init_gc_metatable_for::<Lua>(state, None);
+                #[cfg(feature = "async")]
+                {
+                    init_gc_metatable_for::<AsyncCallback>(state, None);
+                    init_gc_metatable_for::<LocalBoxFuture<Result<MultiValue>>>(state, None);
+                    init_gc_metatable_for::<AsyncPollPending>(state, None);
+                    init_gc_metatable_for::<Waker>(state, None);
+                }
 
                 // Create ref stack thread and place it in the registry to prevent it from being garbage
                 // collected.
@@ -1024,7 +1030,12 @@ impl Lua {
             })?;
         }
 
-        if methods.methods.is_empty() && methods.async_methods.is_empty() {
+        #[cfg(feature = "async")]
+        let no_methods = methods.methods.is_empty() && methods.async_methods.is_empty();
+        #[cfg(not(feature = "async"))]
+        let no_methods = methods.methods.is_empty();
+
+        if no_methods {
             init_userdata_metatable::<RefCell<T>>(self.state, -1, None)?;
         } else {
             protect_lua_closure(self.state, 0, 1, |state| {
@@ -1488,6 +1499,7 @@ unsafe fn ref_stack_pop(extra: &mut ExtraData) -> c_int {
 
 struct StaticUserDataMethods<'lua, T: 'static + UserData> {
     methods: Vec<(Vec<u8>, Callback<'lua, 'static>)>,
+    #[cfg(feature = "async")]
     async_methods: Vec<(Vec<u8>, AsyncCallback<'lua, 'static>)>,
     meta_methods: Vec<(MetaMethod, Callback<'lua, 'static>)>,
     _type: PhantomData<T>,
@@ -1497,6 +1509,7 @@ impl<'lua, T: 'static + UserData> Default for StaticUserDataMethods<'lua, T> {
     fn default() -> StaticUserDataMethods<'lua, T> {
         StaticUserDataMethods {
             methods: Vec::new(),
+            #[cfg(feature = "async")]
             async_methods: Vec::new(),
             meta_methods: Vec::new(),
             _type: PhantomData,

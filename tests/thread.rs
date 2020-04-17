@@ -100,6 +100,7 @@ fn test_thread() -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "async")]
 #[tokio::test]
 async fn test_thread_stream() -> Result<()> {
     let lua = Lua::new();
