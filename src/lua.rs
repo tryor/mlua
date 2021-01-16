@@ -983,17 +983,7 @@ impl Lua {
     ///
     /// Equivalent to `coroutine.create`.
     pub fn create_thread<'lua>(&'lua self, func: Function<'lua>) -> Result<Thread<'lua>> {
-        unsafe {
-            let _sg = StackGuard::new(self.state);
-            assert_stack(self.state, 2);
-
-            let thread_state =
-                protect_lua_closure(self.state, 0, 1, |state| ffi::lua_newthread(state))?;
-            self.push_ref(&func.0);
-            ffi::lua_xmove(self.state, thread_state, 1);
-
-            Ok(Thread(self.pop_ref()))
-        }
+        self.load("return coroutine.create(...)").call(func)
     }
 
     /// Create a Lua userdata object from a custom userdata type.
@@ -1348,6 +1338,15 @@ impl Lua {
             for id in mlua_expect!(unref_list, "unref list not set") {
                 ffi::luaL_unref(self.state, ffi::LUA_REGISTRYINDEX, id);
             }
+        }
+    }
+
+    pub fn try_yield(&self) -> Result<()> {
+        unsafe {
+            protect_lua_closure(self.state, 0, 0, |state| {
+                let nargs = ffi::lua_yield(state, 0);
+                ffi::lua_pop(state, nargs); // Ignore results for now
+            })
         }
     }
 

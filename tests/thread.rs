@@ -145,3 +145,22 @@ fn coroutine_panic() {
         Err(p) => assert!(*p.downcast::<&str>().unwrap() == "test_panic"),
     }
 }
+
+#[test]
+fn coroutine_yield() -> Result<()> {
+    let lua = Lua::new();
+
+    let f = lua.create_function(|lua, ()| {
+        println!("before yield");
+        lua.try_yield()?;
+        println!("after yield");
+        Ok(())
+    })?;
+    let thr = lua.create_thread(f)?;
+
+    thr.resume(())?;
+    println!("in yield");
+    thr.resume(())?;
+
+    Ok(())
+}
