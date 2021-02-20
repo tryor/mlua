@@ -12,8 +12,12 @@ extern "system" {}
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 
-use mlua::{Error, Function, Lua, MetaMethod, Result, String, UserData, UserDataMethods, UserDataFields};
+use mlua::{
+    AnyUserData, Error, Function, Lua, MetaMethod, Result, String, UserData, UserDataFields,
+    UserDataMethods,
+};
 
 #[test]
 fn scope_func() -> Result<()> {
@@ -35,37 +39,11 @@ fn scope_func() -> Result<()> {
     assert_eq!(Rc::strong_count(&rc), 1);
 
     match lua.globals().get::<_, Function>("bad")?.call::<_, ()>(()) {
-        Err(Error::CallbackError { .. }) => {}
+        Err(Error::CallbackError { ref cause, .. }) => match *cause.as_ref() {
+            Error::CallbackDestructed => {}
+            ref err => panic!("wrong error type {:?}", err),
+        },
         r => panic!("improper return for destructed function: {:?}", r),
-    };
-
-    Ok(())
-}
-
-#[test]
-fn scope_drop() -> Result<()> {
-    let lua = Lua::new();
-
-    struct MyUserdata(Rc<()>);
-    impl UserData for MyUserdata {
-        fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-            methods.add_method("method", |_, _, ()| Ok(()));
-        }
-    }
-
-    let rc = Rc::new(());
-
-    lua.scope(|scope| {
-        lua.globals()
-            .set("test", scope.create_userdata(MyUserdata(rc.clone()))?)?;
-        assert_eq!(Rc::strong_count(&rc), 2);
-        Ok(())
-    })?;
-    assert_eq!(Rc::strong_count(&rc), 1);
-
-    match lua.load("test:method()").exec() {
-        Err(Error::CallbackError { .. }) => {}
-        r => panic!("improper return for destructed userdata: {:?}", r),
     };
 
     Ok(())
@@ -90,7 +68,7 @@ fn scope_capture() -> Result<()> {
 }
 
 #[test]
-fn outer_lua_access() -> Result<()> {
+fn scope_outer_lua_access() -> Result<()> {
     let lua = Lua::new();
 
     let table = lua.create_table()?;
@@ -270,6 +248,99 @@ fn scope_userdata_mismatch() -> Result<()> {
         }
         Ok(())
     })?;
+
+    Ok(())
+}
+
+#[test]
+fn scope_userdata_drop() -> Result<()> {
+    let lua = Lua::new();
+
+    struct MyUserData(Rc<()>);
+    impl UserData for MyUserData {
+        fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+            methods.add_method("method", |_, _, ()| Ok(()));
+        }
+    }
+
+    struct MyUserDataArc(Arc<()>);
+    impl UserData for MyUserDataArc {}
+
+    let rc = Rc::new(());
+    let arc = Arc::new(());
+    lua.scope(|scope| {
+        let ud = scope.create_userdata(MyUserData(rc.clone()))?;
+        ud.set_user_value(MyUserDataArc(arc.clone()))?;
+        lua.globals().set("ud", ud)?;
+        assert_eq!(Rc::strong_count(&rc), 2);
+        assert_eq!(Arc::strong_count(&arc), 2);
+        Ok(())
+    })?;
+
+    lua.gc_collect()?;
+    assert_eq!(Rc::strong_count(&rc), 1);
+    assert_eq!(Arc::strong_count(&arc), 1);
+
+    match lua.load("ud:method()").exec() {
+        Err(Error::CallbackError { ref cause, .. }) => match *cause.as_ref() {
+            Error::CallbackDestructed => {}
+            ref err => panic!("wrong error type {:?}", err),
+        },
+        r => panic!("improper return for destructed userdata: {:?}", r),
+    };
+
+    let ud = lua.globals().get::<_, AnyUserData>("ud")?;
+    match ud.borrow::<MyUserData>() {
+        Ok(_) => panic!("succesfull borrow for destructed userdata"),
+        Err(Error::UserDataDestructed) => {}
+        Err(err) => panic!("improper borrow error for destructed userdata: {:?}", err),
+    }
+
+    Ok(())
+}
+
+#[test]
+fn scope_nonstatic_userdata_drop() -> Result<()> {
+    let lua = Lua::new();
+
+    struct MyUserData<'a>(&'a i64);
+    impl<'a> UserData for MyUserData<'a> {
+        fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+            methods.add_method("method", |_, _, ()| Ok(()));
+        }
+    }
+
+    struct MyUserDataArc(Arc<()>);
+    impl UserData for MyUserDataArc {}
+
+    let i = 422;
+    let arc = Arc::new(());
+    lua.scope(|scope| {
+        let ud = scope.create_nonstatic_userdata(MyUserData(&i))?;
+        ud.set_user_value(MyUserDataArc(arc.clone()))?;
+        lua.globals().set("ud", ud)?;
+        lua.load("ud:method()").exec()?;
+        assert_eq!(Arc::strong_count(&arc), 2);
+        Ok(())
+    })?;
+
+    lua.gc_collect()?;
+    assert_eq!(Arc::strong_count(&arc), 1);
+
+    match lua.load("ud:method()").exec() {
+        Err(Error::CallbackError { ref cause, .. }) => match *cause.as_ref() {
+            Error::CallbackDestructed => {}
+            ref err => panic!("wrong error type {:?}", err),
+        },
+        r => panic!("improper return for destructed userdata: {:?}", r),
+    };
+
+    let ud = lua.globals().get::<_, AnyUserData>("ud")?;
+    match ud.borrow::<MyUserData>() {
+        Ok(_) => panic!("succesfull borrow for destructed userdata"),
+        Err(Error::UserDataDestructed) => {}
+        Err(err) => panic!("improper borrow error for destructed userdata: {:?}", err),
+    }
 
     Ok(())
 }
