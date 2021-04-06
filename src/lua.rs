@@ -102,6 +102,11 @@ pub(crate) static EXTRA_REGISTRY_KEY: u8 = 0;
 #[cfg_attr(docsrs, doc(cfg(feature = "send")))]
 unsafe impl Send for Lua {}
 
+/// Requires `feature = "async"`
+#[cfg(feature = "async")]
+#[cfg_attr(docsrs, doc(cfg(feature = "async")))]
+unsafe impl Sync for Lua {}
+
 impl Drop for Lua {
     fn drop(&mut self) {
         unsafe {
